@@ -5,12 +5,20 @@ from .models import CustomUser, Submission, Course, StudentGroup, Assignment
 
 import re
 
+class CustomSelectMultiple(forms.SelectMultiple):
+    def create_option(self, name, value, label, selected, index, subindex=None, attrs=None):
+        option = super().create_option(name, value, label, selected, index, subindex, attrs)
+        if value == '':
+            option['attrs']['disabled'] = True
+            option['label'] = 'Выберите группу'
+        return option
+
 class CustomUserCreationForm(UserCreationForm):
     student_groups = forms.ModelMultipleChoiceField(
         queryset=StudentGroup.objects.all(),
         required=False,
         label='Группы',
-        widget=forms.Select(attrs={'class': 'form-control'})
+        widget=CustomSelectMultiple(attrs={'class': 'form-control'})
     )
 
     class Meta:
@@ -67,6 +75,7 @@ class CustomUserCreationForm(UserCreationForm):
             raise forms.ValidationError('Пароль должен содержать как минимум один специальный символ (!@#$%^&*(),.?":{}|<>).')
 
         return password
+
 
 
 class SubmissionForm(forms.ModelForm):
