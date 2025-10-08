@@ -19,20 +19,10 @@ services:
       - ALLOWED_HOSTS=localhost,127.0.0.1,web
     ports:
       - "2000:8000"
-    depends_on:
-      - db
-    networks:
-      - app-network
-
-  db:
-    image: nouchka/sqlite3:latest
-    volumes:
-      - db_volume:/root/db
     networks:
       - app-network
 
 volumes:
-  db_volume:
   static_volume:
   media_volume:
 
