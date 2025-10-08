@@ -13,6 +13,12 @@ class CustomSelectMultiple(forms.Select):
             option['label'] = 'Выберите группу'
         return option
 
+    def optgroups(self, name, value, attrs=None):
+        # Add the placeholder option as the first option
+        groups = super().optgroups(name, value, attrs)
+        placeholder = [('', [{'name': '', 'value': '', 'label': 'Выберите группу', 'selected': False, 'index': '0', 'attrs': {'disabled': True}}])]
+        return placeholder + groups
+
 class CustomUserCreationForm(UserCreationForm):
     student_groups = forms.ModelMultipleChoiceField(
         queryset=StudentGroup.objects.all(),
@@ -20,7 +26,6 @@ class CustomUserCreationForm(UserCreationForm):
         label='Группы',
         widget=CustomSelectMultiple(attrs={'class': 'form-control'})
     )
-
     class Meta:
         model = CustomUser
         fields = ('username', 'full_name', 'student_groups', 'password1', 'password2')
@@ -42,41 +47,31 @@ class CustomUserCreationForm(UserCreationForm):
         full_name = self.cleaned_data.get('full_name')
         if not full_name:
             raise forms.ValidationError('Поле ФИО не может быть пустым.')
-
         # Split the full name into words (remove extra spaces)
         words = full_name.strip().split()
-
         # Check for at least two words
         if len(words) < 2:
             raise forms.ValidationError('ФИО должно содержать как минимум два слова.')
-
         # Check each word has at least two letters
         for word in words:
             if len(word) < 2:
                 raise forms.ValidationError('Каждое слово в ФИО должно содержать как минимум две буквы.')
-
         return full_name
 
     def clean_password1(self):
         password = self.cleaned_data.get('password1')
         if not password:
             raise forms.ValidationError('Поле пароля не может быть пустым.')
-
         # Check minimum length
         if len(password) < 8:
             raise forms.ValidationError('Пароль должен содержать как минимум 8 символов.')
-
         # Check for at least one uppercase letter
         if not re.search(r'[A-Z]', password):
             raise forms.ValidationError('Пароль должен содержать как минимум одну заглавную букву.')
-
         # Check for at least one special character
         if not re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
             raise forms.ValidationError('Пароль должен содержать как минимум один специальный символ (!@#$%^&*(),.?":{}|<>).')
-
         return password
-
-
 
 class SubmissionForm(forms.ModelForm):
     class Meta:
