@@ -26,6 +26,7 @@ services:
 volumes:
   static_volume:
   media_volume:
+  db:
 
 networks:
   app-network:
