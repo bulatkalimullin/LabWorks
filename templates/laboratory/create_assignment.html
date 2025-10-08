@@ -1,0 +1,69 @@
+
+{% extends 'base.html' %}
+{% block title %}Создать задание{% endblock %}
+{% block content %}
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <h1 class="card-title text-center mb-4">Создать задание</h1>
+                    <form method="post" action="{% url 'laboratory:create_assignment' %}" enctype="multipart/form-data">
+                        {% csrf_token %}
+                        <div class="mb-3">
+                            <label for="{{ form.title.id_for_label }}" class="form-label">Название задания</label>
+                            {{ form.title }}
+                            {% if form.title.errors %}
+                                <div class="text-danger">{{ form.title.errors }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="mb-3">
+                            <label for="{{ form.description.id_for_label }}" class="form-label">Описание</label>
+                            {{ form.description }}
+                            {% if form.description.errors %}
+                                <div class="text-danger">{{ form.description.errors }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="mb-3">
+                            <label for="{{ form.course.id_for_label }}" class="form-label">Курс</label>
+                            {{ form.course }}
+                            {% if form.course.errors %}
+                                <div class="text-danger">{{ form.course.errors }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="mb-3">
+                            <label for="{{ form.allowed_extensions.id_for_label }}" class="form-label">Разрешённое расширение</label>
+                            {{ form.allowed_extensions }}
+                            {% if form.allowed_extensions.errors %}
+                                <div class="text-danger">{{ form.allowed_extensions.errors }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="mb-3">
+                            <label for="{{ form.open_time.id_for_label }}" class="form-label">Время открытия</label>
+                            {{ form.open_time }}
+                            {% if form.open_time.errors %}
+                                <div class="text-danger">{{ form.open_time.errors }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="mb-3">
+                            <label for="{{ form.close_time.id_for_label }}" class="form-label">Время закрытия</label>
+                            {{ form.close_time }}
+                            {% if form.close_time.errors %}
+                                <div class="text-danger">{{ form.close_time.errors }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="mb-3">
+                            <label for="{{ form.files.id_for_label }}" class="form-label">Файлы задания</label>
+                            {{ form.files }}
+                            {% if form.files.errors %}
+                                <div class="text-danger">{{ form.files.errors }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="text-center">
+                            <button type="submit" class="btn btn-primary">Создать</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %}

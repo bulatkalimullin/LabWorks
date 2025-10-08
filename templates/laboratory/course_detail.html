@@ -1,0 +1,50 @@
+
+{% extends 'base.html' %}
+{% block title %}{{ course.name }}{% endblock %}
+{% block content %}
+    <h1 class="mb-4">{{ course.name }}</h1>
+    {% if user.is_staff %}
+        <h2>Группы</h2>
+        {% for group in course.student_groups.all %}
+            <div class="card shadow-sm mb-3">
+                <div class="card-body">
+                    <h5 class="card-title">{{ group.name }}</h5>
+                    <p class="card-text">Студентов: {{ group.students.count }}</p>
+                </div>
+            </div>
+        {% empty %}
+            <p class="text-muted">Группы отсутствуют.</p>
+        {% endfor %}
+    {% else %}
+        <h2>Ваши группы</h2>
+        {% for group in user.student_groups.all %}
+            {% if group.course == course %}
+                <div class="card shadow-sm mb-3">
+                    <div class="card-body">
+                        <h5 class="card-title">{{ group.name }}</h5>
+                    </div>
+                </div>
+            {% endif %}
+        {% empty %}
+            <p class="text-muted">Вы не состоите в группах этого курса.</p>
+        {% endfor %}
+    {% endif %}
+    <h2>Задания</h2>
+    {% for assignment in assignments %}
+        <div class="card shadow-sm mb-3">
+            <div class="card-body">
+                <h5 class="card-title">{{ assignment.title }}</h5>
+                <p class="card-text">{{ assignment.description|truncatewords:30 }}</p>
+                <p><strong>Открыто:</strong> {{ assignment.open_time }}</p>
+                <p><strong>Закрыто:</strong> {{ assignment.close_time }}</p>
+                {% if user.is_staff or assignment.open_time <= now and assignment.close_time >= now %}
+                    <a href="{% url 'laboratory:assignment_detail' assignment.id %}" class="btn btn-primary">Подробнее</a>
+                {% else %}
+                    <p class="text-muted">Задание недоступно в данный момент.</p>
+                {% endif %}
+            </div>
+        </div>
+    {% empty %}
+        <p class="text-muted">Задания отсутствуют.</p>
+    {% endfor %}
+{% endblock %}

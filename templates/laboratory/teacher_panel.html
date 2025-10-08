@@ -1,0 +1,123 @@
+
+{% extends 'base.html' %}
+{% block title %}Панель преподавателя{% endblock %}
+{% block content %}
+    <h1 class="mb-4">Панель преподавателя</h1>
+    <div class="mb-4">
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createGroupModal">Создать группу</button>
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createAssignmentModal">Создать задание</button>
+    </div>
+    {% for course in courses %}
+        <h2>{{ course.name }}</h2>
+        <a href="{% url 'laboratory:export_course' course.id %}" class="btn btn-success mb-3">Экспортировать работы курса</a>
+        {% for group in course.groups.all %}
+            <div class="card shadow-sm mb-3">
+                <div class="card-body">
+                    <h5 class="card-title">{{ group.name }}</h5>
+                    <a href="{% url 'laboratory:export_group' group.id %}" class="btn btn-primary">Экспортировать работы группы</a>
+                </div>
+            </div>
+        {% empty %}
+            <p class="text-muted">Группы отсутствуют.</p>
+        {% endfor %}
+    {% endfor %}
+
+    <!-- Modal for Create Group -->
+    <div class="modal fade" id="createGroupModal" tabindex="-1" aria-labelledby="createGroupModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="createGroupModalLabel">Создать группу</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+                </div>
+                <div class="modal-body">
+                    <form method="post" action="{% url 'laboratory:create_group' %}">
+                        {% csrf_token %}
+                        <div class="mb-3">
+                            <label for="{{ form.name.id_for_label }}" class="form-label">Название группы</label>
+                            {{ form.name }}
+                            {% if form.name.errors %}
+                                <div class="text-danger">{{ form.name.errors }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="mb-3">
+                            <label for="{{ form.course.id_for_label }}" class="form-label">Курс</label>
+                            {{ form.course }}
+                            {% if form.course.errors %}
+                                <div class="text-danger">{{ form.course.errors }}</div>
+                            {% endif %}
+                        </div>
+                        <button type="submit" class="btn btn-primary">Создать</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for Create Assignment -->
+    <div class="modal fade" id="createAssignmentModal" tabindex="-1" aria-labelledby="createAssignmentModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="createAssignmentModalLabel">Создать задание</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+                </div>
+                <div class="modal-body">
+                    <form method="post" action="{% url 'laboratory:create_assignment' %}" enctype="multipart/form-data">
+                        {% csrf_token %}
+                        <div class="mb-3">
+                            <label for="{{ form.title.id_for_label }}" class="form-label">Название задания</label>
+                            {{ form.title }}
+                            {% if form.title.errors %}
+                                <div class="text-danger">{{ form.title.errors }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="mb-3">
+                            <label for="{{ form.description.id_for_label }}" class="form-label">Описание</label>
+                            {{ form.description }}
+                            {% if form.description.errors %}
+                                <div class="text-danger">{{ form.description.errors }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="mb-3">
+                            <label for="{{ form.course.id_for_label }}" class="form-label">Курс</label>
+                            {{ form.course }}
+                            {% if form.course.errors %}
+                                <div class="text-danger">{{ form.course.errors }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="mb-3">
+                            <label for="{{ form.allowed_extensions.id_for_label }}" class="form-label">Разрешённое расширение</label>
+                            {{ form.allowed_extensions }}
+                            {% if form.allowed_extensions.errors %}
+                                <div class="text-danger">{{ form.allowed_extensions.errors }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="mb-3">
+                            <label for="{{ form.open_time.id_for_label }}" class="form-label">Время открытия</label>
+                            {{ form.open_time }}
+                            {% if form.open_time.errors %}
+                                <div class="text-danger">{{ form.open_time.errors }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="mb-3">
+                            <label for="{{ form.close_time.id_for_label }}" class="form-label">Время закрытия</label>
+                            {{ form.close_time }}
+                            {% if form.close_time.errors %}
+                                <div class="text-danger">{{ form.close_time.errors }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="mb-3">
+                            <label for="{{ form.files.id_for_label }}" class="form-label">Файлы задания</label>
+                            {{ form.files }}
+                            {% if form.files.errors %}
+                                <div class="text-danger">{{ form.files.errors }}</div>
+                            {% endif %}
+                        </div>
+                        <button type="submit" class="btn btn-primary">Создать</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %}

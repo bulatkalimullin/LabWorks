@@ -1,0 +1,105 @@
+
+{% extends 'base.html' %}
+{% block title %}{{ assignment.title }}{% endblock %}
+{% block content %}
+    <h1 class="mb-4">{{ assignment.title }}</h1>
+    <div class="card shadow-sm mb-4">
+        <div class="card-body">
+            <p>{{ assignment.description | safe }}</p>
+            <p><strong>Разрешённые расширения:</strong> {{ assignment.allowed_extensions }}</p>
+            <p><strong>Открыто:</strong> {{ assignment.open_time }}</p>
+            <p><strong>Закрыто:</strong> {{ assignment.close_time }}</p>
+            {% if assignment.files %}
+                <a href="{{ assignment.files.url }}" class="btn btn-secondary">Скачать файлы задания</a>
+            {% endif %}
+            {% if not user.is_staff %}
+                <p><strong>Группы:</strong> {% for group in assignment.student_groups.all %}{{ group.name }}{% if not forloop.last %}, {% endif %}{% endfor %}</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Display error or success messages -->
+    {% if messages %}
+        <div class="mb-4">
+            {% for message in messages %}
+                <div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-success{% endif %} alert-dismissible fade show" role="alert">
+                    {{ message }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+
+    {% if not user.is_staff %}
+        <h2>Отправить работу</h2>
+        <div class="card shadow-sm mb-4">
+            <div class="card-body">
+                <p class="text-muted">Выберите файл (разрешённые расширения: {{ assignment.allowed_extensions }}) или введите текстовый ответ. Хотя бы одно поле должно быть заполнено.</p>
+                <form method="post" enctype="multipart/form-data">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label for="{{ form.file.id_for_label }}" class="form-label">Файл</label>
+                        {{ form.file }}
+                        {% if form.file.errors %}
+                            <div class="text-danger">{{ form.file.errors }}</div>
+                        {% endif %}
+                    </div>
+                    <div class="mb-3">
+                        <label for="{{ form.text_response.id_for_label }}" class="form-label">Текстовый ответ</label>
+                        {{ form.text_response }}
+                        {% if form.text_response.errors %}
+                            <div class="text-danger">{{ form.text_response.errors }}</div>
+                        {% endif %}
+                    </div>
+                    <button type="submit" class="btn btn-primary">Отправить</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Display user's previous submissions -->
+        {% if user_submissions %}
+            <h2>Ваши отправленные работы</h2>
+            {% for submission in user_submissions %}
+                <div class="card shadow-sm mb-3">
+                    <div class="card-body">
+                        <p><strong>Отправлено:</strong> {{ submission.submitted_at }}</p>
+                        {% if submission.file %}
+                            <p><strong>Файл:</strong> <a href="{{ submission.file.url }}" class="btn btn-secondary btn-sm">Скачать</a></p>
+                        {% endif %}
+                        {% if submission.text_response %}
+                            <p><strong>Текстовый ответ:</strong> {{ submission.text_response }}</p>
+                        {% endif %}
+                    </div>
+                </div>
+            {% empty %}
+                <p class="text-muted">Вы ещё не отправляли работы для этого задания.</p>
+            {% endfor %}
+        {% else %}
+            <p class="text-muted">Вы ещё не отправляли работы для этого задания.</p>
+        {% endif %}
+    {% endif %}
+
+    {% if user.is_staff %}
+        <h2>Работы студентов</h2>
+        <form method="post" class="mb-4">
+            {% csrf_token %}
+            <button type="submit" name="download_submissions" class="btn btn-primary">Скачать все работы</button>
+        </form>
+        {% for submission in assignment.submissions.all %}
+            <div class="card shadow-sm mb-3">
+                <div class="card-body">
+                    <p><strong>Студент:</strong> {{ submission.student.full_name }}</p>
+                    <p><strong>Отправлено:</strong> {{ submission.submitted_at }}</p>
+                    {% if submission.file %}
+                        <a href="{{ submission.file.url }}" class="btn btn-secondary">Скачать работу</a>
+                    {% endif %}
+                    {% if submission.text_response %}
+                        <p><strong>Текстовый ответ:</strong> {{ submission.text_response }}</p>
+                    {% endif %}
+                </div>
+            </div>
+        {% empty %}
+            <p class="text-muted">Работы отсутствуют.</p>
+        {% endfor %}
+    {% endif %}
+{% endblock %}
