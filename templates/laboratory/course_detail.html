@@ -34,7 +34,7 @@
         <div class="card shadow-sm mb-3">
             <div class="card-body">
                 <h5 class="card-title">{{ assignment.title }}</h5>
-                <p class="card-text">{{ assignment.description|truncatewords:30 }}</p>
+                <p class="card-text">{{ assignment.description|truncatewords:30 |safe }}</p>
                 <p><strong>Открыто:</strong> {{ assignment.open_time }}</p>
                 <p><strong>Закрыто:</strong> {{ assignment.close_time }}</p>
                 {% if user.is_staff or assignment.open_time <= now and assignment.close_time >= now %}
