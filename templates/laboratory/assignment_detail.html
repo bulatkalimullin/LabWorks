@@ -10,7 +10,7 @@
             <p><strong>Открыто:</strong> {{ assignment.open_time }}</p>
             <p><strong>Закрыто:</strong> {{ assignment.close_time }}</p>
             {% if assignment.files %}
-                <a href="{{ assignment.files.url }}" class="btn btn-secondary">Скачать файлы задания</a>
+                <a href="{{ assignment.files.url }}" class="btn btn-secondary" download>Скачать файлы задания</a>
             {% endif %}
             {% if not user.is_staff %}
                 <p><strong>Группы:</strong> {% for group in assignment.student_groups.all %}{{ group.name }}{% if not forloop.last %}, {% endif %}{% endfor %}</p>
@@ -64,7 +64,7 @@
                     <div class="card-body">
                         <p><strong>Отправлено:</strong> {{ submission.submitted_at }}</p>
                         {% if submission.file %}
-                            <p><strong>Файл:</strong> <a href="{{ submission.file.url }}" class="btn btn-secondary btn-sm">Скачать</a></p>
+                            <p><strong>Файл:</strong> <a href="{{ submission.file.url }}" class="btn btn-secondary btn-sm"download>Скачать</a></p>
                         {% endif %}
                         {% if submission.text_response %}
                             <p><strong>Текстовый ответ:</strong> {{ submission.text_response }}</p>
@@ -83,7 +83,7 @@
         <h2>Работы студентов</h2>
         <form method="post" class="mb-4">
             {% csrf_token %}
-            <button type="submit" name="download_submissions" class="btn btn-primary">Скачать все работы</button>
+            <button type="submit" name="download_submissions" class="btn btn-primary"download>Скачать все работы</button>
         </form>
         {% for submission in assignment.submissions.all %}
             <div class="card shadow-sm mb-3">
@@ -91,7 +91,7 @@
                     <p><strong>Студент:</strong> {{ submission.student.full_name }}</p>
                     <p><strong>Отправлено:</strong> {{ submission.submitted_at }}</p>
                     {% if submission.file %}
-                        <a href="{{ submission.file.url }}" class="btn btn-secondary">Скачать работу</a>
+                        <a href="{{ submission.file.url }}" class="btn btn-secondary"download>Скачать работу</a>
                     {% endif %}
                     {% if submission.text_response %}
                         <p><strong>Текстовый ответ:</strong> {{ submission.text_response }}</p>
