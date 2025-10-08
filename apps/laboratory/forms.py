@@ -10,7 +10,7 @@ class CustomUserCreationForm(UserCreationForm):
         queryset=StudentGroup.objects.all(),
         required=False,
         label='Группы',
-        widget=forms.SelectMultiple(attrs={'class': 'form-control'})
+        widget=forms.Select(attrs={'class': 'form-control'})
     )
 
     class Meta:
