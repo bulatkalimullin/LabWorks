@@ -25,10 +25,13 @@ def register(request):
         if form.is_valid():
             user = CustomUser.objects.create(
                 username=form.cleaned_data['username'],
-                full_name=form.cleaned_data['full_name'],
-                student_groups = [form.cleaned_data['student_groups']]
+                full_name=form.cleaned_data['full_name']
             )
             user.set_password(form.cleaned_data['password1'])
+            student_group = form.cleaned_data['student_groups']
+            if student_group:
+                user.student_groups.add(student_group)
+            user.save()
             login(request, user)
             messages.success(request, 'Регистрация успешно завершена!')
             return redirect('laboratory:index')
