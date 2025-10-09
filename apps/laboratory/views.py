@@ -83,7 +83,6 @@ def assignment_detail(request, assignment_id):
         try:
             assignment = Assignment.objects.get(
                     id=assignment_id,
-                    student_groups__in=request.user.student_groups.all(),
                     open_time__lte=now,
                     close_time__gte=now
                 )
