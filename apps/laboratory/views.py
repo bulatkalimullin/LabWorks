@@ -70,17 +70,23 @@ def assignment_detail(request, assignment_id):
     now = timezone.now()
     if request.user.is_staff:
         # Staff can access any assignment
-        assignment = get_object_or_404(Assignment, id=assignment_id)
+        assignment = Assignment.objects.filter(
+            id=assignment_id,
+        )
+        if not assignment.exists():
+            return HttpResponseForbidden()
+
     else:
         # Non-staff users must be in assignment's groups and within time window
-        assignment = get_object_or_404(
-            Assignment.objects.filter(
-                id=assignment_id,
-                student_groups__in=request.user.student_groups.all(),
-                open_time__lte=now,
-                close_time__gte=now
-            )
-        )
+        try
+            assignment = Assignment.objects.get(
+                    id=assignment_id,
+                    student_groups__in=request.user.student_groups.all(),
+                    open_time__lte=now,
+                    close_time__gte=now
+                )
+        except:
+            return HttpResponseForbidden()
 
     # Get user's submissions for non-staff users
     user_submissions = Submission.objects.filter(assignment=assignment, student=request.user) if not request.user.is_staff else []
