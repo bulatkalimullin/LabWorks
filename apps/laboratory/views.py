@@ -1,4 +1,3 @@
-
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.http import HttpResponse, HttpResponseForbidden
@@ -67,31 +66,28 @@ def course_detail(request, course_id):
     return render(request, 'laboratory/course_detail.html', {'course': course, 'assignments': assignments, 'now': now})
 
 @login_required
-def assignment_detail(request, assignment_id):
+def assignment_detail(request, assignment_uuid):
     now = timezone.now()
     if request.user.is_staff:
         # Staff can access any assignment
         try:
             assignment = Assignment.objects.get(
-                id=assignment_id,
+                id=assignment_uuid,
             )
-
-        except:
+        except Assignment.DoesNotExist:
             return HttpResponseNotFound()
     else:
         # Non-staff users must be in assignment's groups and within time window
         try:
             assignment = Assignment.objects.get(
-                    id=assignment_id,
-                    open_time__lte=now,
-                    close_time__gte=now
-                )
-        except:
+                id=assignment_uuid,
+                open_time__lte=now,
+                close_time__gte=now
+            )
+        except Assignment.DoesNotExist:
             return HttpResponseForbidden()
-
     # Get user's submissions for non-staff users
     user_submissions = Submission.objects.filter(assignment=assignment, student=request.user) if not request.user.is_staff else []
-
     # Handle download all submissions for staff
     if request.method == 'POST' and request.user.is_staff and 'download_submissions' in request.POST:
         submissions = Submission.objects.filter(assignment=assignment)
@@ -117,7 +113,6 @@ def assignment_detail(request, assignment_id):
         response = HttpResponse(buffer, content_type='application/zip')
         response['Content-Disposition'] = f'attachment; filename="{assignment.title}_submissions.zip"'
         return response
-
     if request.method == 'POST' and not request.user.is_staff:
         form = SubmissionForm(request.POST, request.FILES)
         if form.is_valid():
@@ -143,7 +138,6 @@ def assignment_detail(request, assignment_id):
             messages.error(request, 'Пожалуйста, исправьте ошибки в форме.')
     else:
         form = SubmissionForm()
-
     return render(request, 'laboratory/assignment_detail.html', {
         'assignment': assignment,
         'form': form,
@@ -156,7 +150,6 @@ def teacher_panel(request):
     courses = Course.objects.all()
     group_form = GroupForm(request.POST or None)
     assignment_form = AssignmentForm(request.POST or None, request.FILES or None)
-
     if request.method == 'POST':
         if 'group_form' in request.POST and group_form.is_valid():
             group_form.save()
@@ -168,7 +161,6 @@ def teacher_panel(request):
             return redirect('laboratory:teacher_panel')
         else:
             messages.error(request, 'Пожалуйста, исправьте ошибки ниже.')
-
     return render(request, 'laboratory/teacher_panel.html', {
         'courses': courses,
         'group_form': group_form,
@@ -214,7 +206,6 @@ def export_submissions(request, course_id=None, group_id=None):
     else:
         submissions = Submission.objects.all()
         name = 'all'
-
     buffer = BytesIO()
     with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
         for submission in submissions:

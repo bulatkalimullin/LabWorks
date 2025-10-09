@@ -1,6 +1,7 @@
 
 from django.db import models
 from django.contrib.auth.models import AbstractUser, Group as AuthGroup
+from uuid import uuid4
 
 class CustomUser(AbstractUser):
     full_name = models.CharField(max_length=255)
@@ -24,6 +25,7 @@ class StudentGroup(models.Model):
         return self.name
 
 class Assignment(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
     title = models.CharField(max_length=255)
     description = models.TextField()
     course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name='assignments')
