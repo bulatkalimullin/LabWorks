@@ -5,14 +5,13 @@ from .models import CustomUser, Submission, Course, StudentGroup, Assignment
 
 import re
 
-
-
 class CustomUserCreationForm(UserCreationForm):
-    student_groups = forms.ModelMultipleChoiceField(
+    student_groups = forms.ModelChoiceField(
         queryset=StudentGroup.objects.all(),
         required=False,
-        label='Группы',
-        widget=forms.SelectMultiple(attrs={'class': 'form-control'})
+        label='Группа',
+        widget=forms.Select(attrs={'class': 'form-control'}),
+        empty_label='Выберите группу'
     )
 
     class Meta:
@@ -21,7 +20,7 @@ class CustomUserCreationForm(UserCreationForm):
         labels = {
             'username': 'Имя пользователя',
             'full_name': 'ФИО',
-            'student_groups': 'Группы',
+            'student_groups': 'Группа',
             'password1': 'Пароль',
             'password2': 'Подтверждение пароля',
         }
@@ -36,39 +35,37 @@ class CustomUserCreationForm(UserCreationForm):
         full_name = self.cleaned_data.get('full_name')
         if not full_name:
             raise forms.ValidationError('Поле ФИО не может быть пустым.')
-
         # Split the full name into words (remove extra spaces)
         words = full_name.strip().split()
-
         # Check for at least two words
         if len(words) < 2:
             raise forms.ValidationError('ФИО должно содержать как минимум два слова.')
-
         # Check each word has at least two letters
         for word in words:
             if len(word) < 2:
                 raise forms.ValidationError('Каждое слово в ФИО должно содержать как минимум две буквы.')
-
         return full_name
 
     def clean_password1(self):
         password = self.cleaned_data.get('password1')
         if not password:
             raise forms.ValidationError('Поле пароля не может быть пустым.')
-
         # Check minimum length
         if len(password) < 8:
             raise forms.ValidationError('Пароль должен содержать как минимум 8 символов.')
-
         # Check for at least one uppercase letter
         if not re.search(r'[A-Z]', password):
             raise forms.ValidationError('Пароль должен содержать как минимум одну заглавную букву.')
-
         # Check for at least one special character
         if not re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
             raise forms.ValidationError('Пароль должен содержать как минимум один специальный символ (!@#$%^&*(),.?":{}|<>).')
-
         return password
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Make the default option disabled
+        self.fields['student_groups'].widget.attrs['data-placeholder'] = 'Выберите группу'
+        self.fields['student_groups'].empty_label = 'Выберите группу'
 
 
 

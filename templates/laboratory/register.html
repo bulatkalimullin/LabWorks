@@ -1,4 +1,3 @@
-
 {% extends 'base.html' %}
 {% block title %}Регистрация{% endblock %}
 {% block content %}
@@ -24,12 +23,12 @@
                             {% endif %}
                         </div>
                         <div class="mb-3">
-                            <label for="{{ form.student_groups.id_for_label }}" class="form-label">Группы</label>
+                            <label for="{{ form.student_groups.id_for_label }}" class="form-label">Группа</label>
                             {{ form.student_groups }}
                             {% if form.student_groups.errors %}
                                 <div class="text-danger">{{ form.student_groups.errors }}</div>
                             {% endif %}
-                            <small class="form-text text-muted">Выберите группу где вы состоите</small>
+                            <small class="form-text text-muted">Выберите группу, в которой вы состоите</small>
                         </div>
                         <div class="mb-3">
                             <label for="{{ form.password1.id_for_label }}" class="form-label">Пароль</label>
@@ -53,4 +52,16 @@
             </div>
         </div>
     </div>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const select = document.querySelector('#{{ form.student_groups.id_for_label }}');
+            if (select) {
+                const defaultOption = select.querySelector('option[value=""]');
+                if (defaultOption) {
+                    defaultOption.disabled = true;
+                    defaultOption.text = 'Выберите группу';
+                }
+            }
+        });
+    </script>
 {% endblock %}
