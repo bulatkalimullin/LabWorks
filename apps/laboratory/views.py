@@ -4,6 +4,7 @@ from django.http import HttpResponse, HttpResponseForbidden
 from django.contrib.auth import login, authenticate, logout
 from .models import Course, Assignment, Submission, StudentGroup
 from .forms import CustomUserCreationForm, SubmissionForm, GroupForm, AssignmentForm
+from .models import CustomUser
 from django.utils import timezone
 from django.http.response import HttpResponseNotFound
 from django.contrib import messages
@@ -22,7 +23,12 @@ def register(request):
     if request.method == 'POST':
         form = CustomUserCreationForm(request.POST)
         if form.is_valid():
-            user = form.save()
+            user = CustomUser.objects.create(
+                username=form.cleaned_data['username'],
+                full_name=form.cleaned_data['full_name'],
+                student_groups = [form.cleaned_data['student_groups']]
+            )
+            user.set_password(form.cleaned_data['password1'])
             login(request, user)
             messages.success(request, 'Регистрация успешно завершена!')
             return redirect('laboratory:index')
