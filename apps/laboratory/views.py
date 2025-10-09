@@ -6,6 +6,7 @@ from django.contrib.auth import login, authenticate, logout
 from .models import Course, Assignment, Submission, StudentGroup
 from .forms import CustomUserCreationForm, SubmissionForm, GroupForm, AssignmentForm
 from django.utils import timezone
+from django.http.response import HttpResponseNotFound
 from django.contrib import messages
 import zipfile
 from io import BytesIO
@@ -70,15 +71,16 @@ def assignment_detail(request, assignment_id):
     now = timezone.now()
     if request.user.is_staff:
         # Staff can access any assignment
-        assignment = Assignment.objects.filter(
-            id=assignment_id,
-        )
-        if not assignment.exists():
-            return HttpResponseForbidden()
+        try:
+            assignment = Assignment.objects.get(
+                id=assignment_id,
+            )
 
+        except:
+            return HttpResponseNotFound()
     else:
         # Non-staff users must be in assignment's groups and within time window
-        try
+        try:
             assignment = Assignment.objects.get(
                     id=assignment_id,
                     student_groups__in=request.user.student_groups.all(),
