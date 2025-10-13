@@ -54,11 +54,6 @@ class CustomUserCreationForm(UserCreationForm):
         if len(password) < 8:
             raise forms.ValidationError('Пароль должен содержать как минимум 8 символов.')
         # Check for at least one uppercase letter
-        if not re.search(r'[A-Z]', password):
-            raise forms.ValidationError('Пароль должен содержать как минимум одну заглавную букву.')
-        # Check for at least one special character
-        if not re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
-            raise forms.ValidationError('Пароль должен содержать как минимум один специальный символ (!@#$%^&*(),.?":{}|<>).')
         return password
 
     def __init__(self, *args, **kwargs):
