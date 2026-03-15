@@ -52,7 +52,7 @@ body::before {
     radial-gradient(ellipse 60% 40% at 100% 100%, rgba(139, 92, 246, 0.12), transparent 50%),
     radial-gradient(ellipse 50% 60% at 0% 80%, rgba(59, 130, 246, 0.06), transparent 45%);
   background-size: 100% 100%;
-  animation: bgDrift 20s ease-in-out infinite;
+  animation: bgDrift 50s ease-in-out infinite;
   pointer-events: none;
 }
 body::after {
@@ -61,8 +61,14 @@ body::after {
   inset: 0;
   z-index: -1;
   background: radial-gradient(ellipse 100% 80% at 50% 50%, transparent 0%, rgba(15, 23, 42, 0.3) 100%);
-  animation: bgPulse 8s ease-in-out infinite;
+  animation: bgPulse 24s ease-in-out infinite;
   pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  body::before,
+  body::after {
+    animation: none;
+  }
 }
 
 a {
@@ -920,6 +926,12 @@ tr:hover td {
   word-break: break-all;
 }
 
+/* Карточки курсов без backdrop-filter для снижения нагрузки на GPU */
+.course-card.glass {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: var(--surface);
+}
 .course-card {
   position: relative;
   padding: 0;
@@ -938,6 +950,13 @@ tr:hover td {
   height: 100%;
   object-fit: cover;
   transition: transform 0.4s ease;
+}
+.course-card-image--crossfade {
+  transition: opacity 0.6s ease-in-out;
+}
+.course-card-image-wrap--stacked .course-card-image {
+  position: absolute;
+  inset: 0;
 }
 .course-card:hover .course-card-image {
   transform: scale(1.05);

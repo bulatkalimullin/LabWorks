@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion } from 'framer-motion'
 import { api, type Course, type CourseImage, type Assignment } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import { BookOpen, Shield, FileText } from 'lucide-react'
@@ -15,27 +15,44 @@ function assignmentIsAvailable(a: Assignment): boolean {
 const ROTATE_BG_INTERVAL_MS = 5000
 
 function CourseCardBackground({ images, courseName }: { images: CourseImage[]; courseName: string }) {
-  const [index, setIndex] = useState(0)
+  const n = images.length
+  const [state, setState] = useState(() => ({
+    showFirst: true,
+    slot1Index: 0,
+    slot2Index: n > 1 ? 1 : 0,
+  }))
   useEffect(() => {
-    if (images.length <= 1) return
-    const id = setInterval(() => setIndex((i) => (i + 1) % images.length), ROTATE_BG_INTERVAL_MS)
+    if (n <= 1) return
+    const id = setInterval(() => {
+      setState((prev) => {
+        const newShowFirst = !prev.showFirst
+        if (newShowFirst === false) {
+          return { ...prev, showFirst: false, slot1Index: (prev.slot2Index + 1) % n }
+        }
+        return { ...prev, showFirst: true, slot2Index: (prev.slot1Index + 1) % n }
+      })
+    }, ROTATE_BG_INTERVAL_MS)
     return () => clearInterval(id)
-  }, [images.length])
-  if (images.length === 0) return null
+  }, [n])
+  if (n === 0) return null
+  const stacked = n > 1
   return (
-    <div className="course-card-image-wrap">
-      <AnimatePresence mode="wait" initial={false}>
-        <motion.img
-          key={images[index].id}
-          src={images[index].image}
-          alt={courseName}
-          className="course-card-image"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.6 }}
+    <div className={`course-card-image-wrap${stacked ? ' course-card-image-wrap--stacked' : ''}`}>
+      <img
+        src={images[state.slot1Index].image}
+        alt={courseName}
+        className="course-card-image course-card-image--crossfade"
+        style={{ opacity: state.showFirst ? 1 : 0 }}
+      />
+      {stacked && (
+        <img
+          src={images[state.slot2Index].image}
+          alt=""
+          aria-hidden
+          className="course-card-image course-card-image--crossfade"
+          style={{ opacity: state.showFirst ? 0 : 1 }}
         />
-      </AnimatePresence>
+      )}
       <div className="course-card-image-overlay" />
     </div>
   )

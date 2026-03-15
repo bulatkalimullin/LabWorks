@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Navigate } from 'react-router-dom'
+import { QRCodeSVG } from 'qrcode.react'
 import { api, parseApiError } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
@@ -189,13 +190,9 @@ export default function AccountPage() {
                       <h3 style={{ margin: '0 0 0.5rem', fontSize: '0.95rem' }}>Шаг 2. Добавьте аккаунт в приложение</h3>
                       {otpauthUrl && (
                         <div style={{ textAlign: 'center', marginBottom: '0.75rem' }}>
-                          <img
-                            src={`https://api.qrserver.com/v1/create-qr-code/?size=190x190&data=${encodeURIComponent(
-                              otpauthUrl,
-                            )}`}
-                            alt="QR для Google Authenticator"
-                            style={{ borderRadius: 12, border: '1px solid var(--border)', background: 'white' }}
-                          />
+                          <div style={{ display: 'inline-block', padding: 12, borderRadius: 12, border: '1px solid var(--border)', background: 'white' }}>
+                            <QRCodeSVG value={otpauthUrl} size={190} level="M" />
+                          </div>
                         </div>
                       )}
                       <label>Секрет для резервного копирования</label>
