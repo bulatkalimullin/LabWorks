@@ -34,9 +34,25 @@ ALLOWED_HOSTS = [
 ] or ['*']
 # Ensure common docker/nginx hosts are always allowed to avoid DisallowedHost
 EXTRA_HOSTS = {'localhost', '127.0.0.1', 'api', 'nginx', 'api_backend'}
+# Добавляем SSL_DOMAIN из .env, чтобы публичный домен не давал 400
+_ssl_domain = (os.environ.get('SSL_DOMAIN') or '').strip()
+if _ssl_domain:
+    EXTRA_HOSTS.add(_ssl_domain)
 if ALLOWED_HOSTS != ['*']:
     ALLOWED_HOSTS = list({*ALLOWED_HOSTS, *EXTRA_HOSTS})
 
+# CSRF: для HTTPS нужны доверенные origins (иначе 403 CSRF verification failed)
+CSRF_TRUSTED_ORIGINS = [
+    f"https://{_ssl_domain}",
+    f"http://{_ssl_domain}",
+] if _ssl_domain else []
+# Добавляем из переменной окружения, если задана (через запятую)
+_csrf_origins = (os.environ.get('CSRF_TRUSTED_ORIGINS') or '').strip()
+if _csrf_origins:
+    CSRF_TRUSTED_ORIGINS.extend(o.strip() for o in _csrf_origins.split(',') if o.strip())
+
+# За прокси (nginx): использовать X-Forwarded-Proto для https, чтобы media/static URL были https://
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 # Application definition
 

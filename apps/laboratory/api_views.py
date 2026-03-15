@@ -1,6 +1,5 @@
 import hashlib
 import hmac
-import secrets
 import zipfile
 from io import BytesIO
 
@@ -35,10 +34,6 @@ from .serializers import (
     TwoFADisableSerializer,
 )
 from .permissions import IsTeacher
-
-
-RESET_TOKEN_CACHE_PREFIX = 'pwd_reset:'
-RESET_TOKEN_TTL = 900  # 15 min
 
 
 @api_view(['GET'])
@@ -91,38 +86,57 @@ def password_change(request):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def password_reset_request(request):
-    """По username выдаётся reset_token (одноразовый, 15 мин). Без email."""
+    """По username возвращается totp_required. Токен не выдаётся."""
     ser = PasswordResetRequestSerializer(data=request.data)
     ser.is_valid(raise_exception=True)
     username = ser.validated_data['username']
-    token = secrets.token_urlsafe(32)
-    cache.set(f'{RESET_TOKEN_CACHE_PREFIX}{username}', token, RESET_TOKEN_TTL)
+    user = CustomUser.objects.get(username=username)
+    totp_required = bool(user.totp_enabled)
+    if totp_required:
+        return Response({'totp_required': True})
     return Response({
-        'detail': 'Сохраните токен и используйте его в течение 15 минут.',
-        'reset_token': token,
-        'username': username,
+        'totp_required': False,
+        'detail': 'Для сброса пароля обратитесь к администратору.',
     })
 
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def password_reset_confirm(request):
+    """Подтверждение сброса по коду TOTP. Только для пользователей с включённым 2FA."""
     ser = PasswordResetConfirmSerializer(data=request.data)
     ser.is_valid(raise_exception=True)
     username = ser.validated_data['username']
-    token = ser.validated_data['reset_token']
+    totp_code = (ser.validated_data['totp_code'] or '').strip()
     new_password = ser.validated_data['new_password']
-    cached = cache.get(f'{RESET_TOKEN_CACHE_PREFIX}{username}')
-    if not cached or cached != token:
-        return Response({'detail': 'Неверный или просроченный токен'}, status=status.HTTP_400_BAD_REQUEST)
     try:
         user = CustomUser.objects.get(username=username)
     except CustomUser.DoesNotExist:
-        return Response(status=status.HTTP_404_NOT_FOUND)
+        return Response({'detail': 'Пользователь не найден'}, status=status.HTTP_404_NOT_FOUND)
+    if not user.totp_enabled:
+        return Response(
+            {'detail': 'Для сброса пароля обратитесь к администратору.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    secret = _normalize_totp_secret(user.totp_secret)
+    totp = pyotp.TOTP(secret)
+    if not totp.verify(totp_code, valid_window=2):
+        return Response({'detail': 'Неверный код из аутентификатора'}, status=status.HTTP_400_BAD_REQUEST)
     user.set_password(new_password)
     user.save()
-    cache.delete(f'{RESET_TOKEN_CACHE_PREFIX}{username}')
     return Response({'detail': 'Пароль обновлён'})
+
+
+def _safe_totp_account_name(username: str) -> str:
+    """Имя для otpauth без символов, ломающих разбор (например ':' в метке)."""
+    if not username:
+        return 'user'
+    return username.replace(':', '-').strip() or 'user'
+
+
+def _normalize_totp_secret(secret: str) -> str:
+    """Канонический вид секрета (base32): без пробелов, верхний регистр."""
+    return (secret or '').strip().upper()
 
 
 @api_view(['POST'])
@@ -132,12 +146,14 @@ def twofa_setup(request):
     user = request.user
     if user.totp_enabled:
         return Response({'detail': '2FA уже включена. Сначала отключите.'}, status=status.HTTP_400_BAD_REQUEST)
-    if not user.totp_secret:
-        user.totp_secret = pyotp.random_base32()
-        user.save(update_fields=['totp_secret'])
+    # Всегда генерируем новый секрет при запросе setup, чтобы QR и БД совпадали
+    raw_secret = pyotp.random_base32()
+    user.totp_secret = raw_secret.strip().upper()
+    user.save(update_fields=['totp_secret'])
     totp = pyotp.TOTP(user.totp_secret)
     issuer = 'FileCompetition'
-    otpauth_url = totp.provisioning_uri(name=user.username, issuer_name=issuer)
+    account_name = _safe_totp_account_name(user.username)
+    otpauth_url = totp.provisioning_uri(name=account_name, issuer_name=issuer)
     return Response({
         'secret': user.totp_secret,
         'otpauth_url': otpauth_url,
@@ -155,8 +171,9 @@ def twofa_enable(request):
         return Response({'detail': 'Сначала вызовите POST /auth/2fa/setup/'}, status=status.HTTP_400_BAD_REQUEST)
     ser = TwoFAEnableSerializer(data=request.data)
     ser.is_valid(raise_exception=True)
-    totp = pyotp.TOTP(user.totp_secret)
-    if not totp.verify(ser.validated_data['code'].strip(), valid_window=1):
+    secret = _normalize_totp_secret(user.totp_secret)
+    totp = pyotp.TOTP(secret)
+    if not totp.verify(ser.validated_data['code'].strip(), valid_window=2):
         return Response({'detail': 'Неверный код'}, status=status.HTTP_400_BAD_REQUEST)
     user.totp_enabled = True
     user.save(update_fields=['totp_enabled'])

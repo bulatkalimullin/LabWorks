@@ -311,8 +311,9 @@ class TokenObtainPairWith2FASerializer(TokenObtainPairSerializer):
             code = (attrs.get('totp_code') or '').strip()
             if not code:
                 raise serializers.ValidationError({'totp_code': 'Введите код из Google Authenticator'})
-            totp = pyotp.TOTP(user.totp_secret)
-            if not totp.verify(code, valid_window=1):
+            secret = (user.totp_secret or '').strip().upper()
+            totp = pyotp.TOTP(secret)
+            if not totp.verify(code, valid_window=2):
                 raise serializers.ValidationError({'totp_code': 'Неверный код'})
         # Log successful login
         ip = None
@@ -357,7 +358,7 @@ class PasswordChangeSerializer(serializers.Serializer):
 
 
 class PasswordResetRequestSerializer(serializers.Serializer):
-    """По username выдаётся одноразовый токен (сохраните его; без email)."""
+    """По username возвращается totp_required (токен не выдаётся)."""
     username = serializers.CharField(max_length=150)
 
     def validate_username(self, value):
@@ -368,7 +369,7 @@ class PasswordResetRequestSerializer(serializers.Serializer):
 
 class PasswordResetConfirmSerializer(serializers.Serializer):
     username = serializers.CharField(max_length=150)
-    reset_token = serializers.CharField(max_length=128)
+    totp_code = serializers.CharField(max_length=10)
     new_password = serializers.CharField(write_only=True, min_length=8)
 
     def validate_new_password(self, value):
