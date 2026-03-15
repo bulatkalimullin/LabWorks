@@ -257,6 +257,10 @@ cython_debug/
 # Poetry local configuration file - https://python-poetry.org/docs/configuration/#local-configuration
 poetry.toml
 
+# SSL / Let's Encrypt (сертификаты не коммитить)
+ssl/
+certbot/
+
 # ruff
 .ruff_cache/
 
