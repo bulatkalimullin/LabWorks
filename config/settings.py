@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -20,28 +21,46 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-003fx8ayry1qrc_*--xplfts#3awoo87baj*k23_rs^2)#i-8b'
+SECRET_KEY = os.environ.get(
+    'DJANGO_SECRET_KEY',
+    'django-insecure-003fx8ayry1qrc_*--xplfts#3awoo87baj*k23_rs^2)#i-8b',
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ["*"]
+ALLOWED_HOSTS = [
+    h.strip() for h in os.environ.get('ALLOWED_HOSTS', '*').split(',') if h.strip()
+] or ['*']
+# Ensure common docker/nginx hosts are always allowed to avoid DisallowedHost
+EXTRA_HOSTS = {'localhost', '127.0.0.1', 'api', 'nginx', 'api_backend'}
+if ALLOWED_HOSTS != ['*']:
+    ALLOWED_HOSTS = list({*ALLOWED_HOSTS, *EXTRA_HOSTS})
 
 
 # Application definition
 
 INSTALLED_APPS = [
+    'unfold',
+    'unfold.contrib.filters',
+    'unfold.contrib.forms',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'apps.laboratory'
+    'rest_framework',
+    'rest_framework_simplejwt',
+    'corsheaders',
+    'import_export',
+    'apps.laboratory',
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -59,12 +78,24 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+if os.environ.get('POSTGRES_HOST'):
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.environ.get('POSTGRES_DB', 'filecompetition'),
+            'USER': os.environ.get('POSTGRES_USER', 'postgres'),
+            'PASSWORD': os.environ.get('POSTGRES_PASSWORD', 'postgres'),
+            'HOST': os.environ.get('POSTGRES_HOST', 'db'),
+            'PORT': os.environ.get('POSTGRES_PORT', '5432'),
+        }
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
 
 # Password validation
@@ -138,3 +169,122 @@ AUTH_USER_MODEL = 'laboratory.CustomUser'
 
 LOGIN_URL = '/login/'
 LOGOUT_REDIRECT_URL = '/'
+
+# Django REST Framework + JWT
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
+}
+
+from datetime import timedelta
+
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(hours=10),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'ROTATE_REFRESH_TOKENS': True,
+}
+
+# CORS (SPA frontend)
+CORS_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get('CORS_ALLOWED_ORIGINS', 'http://localhost:3000,http://127.0.0.1:3000').split(',')
+    if origin.strip()
+]
+CORS_ALLOW_CREDENTIALS = True
+
+from django.urls import reverse_lazy
+
+UNFOLD = {
+    "SITE_TITLE": "FileCompetition Admin",
+    "SITE_HEADER": "FileCompetition",
+    "SITE_SYMBOL": "school",
+    "SHOW_HISTORY": True,
+    "SHOW_VIEW_ON_SITE": False,
+    "SIDEBAR": {
+        "show_search": True,
+        "show_all_applications": False,
+        "navigation": [
+            {
+                "title": "Аналитика",
+                "collapsible": False,
+                "items": [
+                    {
+                        "title": "Дашборд",
+                        "icon": "bar_chart",
+                        "link": reverse_lazy("admin-dashboard"),
+                    },
+                ],
+            },
+            {
+                "title": "Пользователи и группы",
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": "Пользователи",
+                        "icon": "people",
+                        "link": reverse_lazy("admin:laboratory_customuser_changelist"),
+                    },
+                    {
+                        "title": "Группы студентов",
+                        "icon": "group",
+                        "link": reverse_lazy("admin:laboratory_studentgroup_changelist"),
+                    },
+                ],
+            },
+            {
+                "title": "Учебный процесс",
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": "Курсы",
+                        "icon": "school",
+                        "link": reverse_lazy("admin:laboratory_course_changelist"),
+                    },
+                    {
+                        "title": "Задания",
+                        "icon": "assignment",
+                        "link": reverse_lazy("admin:laboratory_assignment_changelist"),
+                    },
+                    {
+                        "title": "Сдачи",
+                        "icon": "upload_file",
+                        "link": reverse_lazy("admin:laboratory_submission_changelist"),
+                    },
+                    {
+                        "title": "События",
+                        "icon": "timeline",
+                        "link": reverse_lazy("admin:laboratory_assignmentevent_changelist"),
+                    },
+                ],
+            },
+        ],
+    },
+}
+
+# Redis cache (optional; used when REDIS_URL is set)
+if os.environ.get('REDIS_URL'):
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': os.environ.get('REDIS_URL'),
+        }
+    }
+
+# Celery
+CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', os.environ.get('REDIS_URL', 'redis://localhost:6379/0'))
+CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', CELERY_BROKER_URL)
+
+# S3 / MinIO (optional)
+if os.environ.get('AWS_STORAGE_BUCKET_NAME'):
+    INSTALLED_APPS.append('storages')
+    DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
+    AWS_ACCESS_KEY_ID = os.environ.get('AWS_ACCESS_KEY_ID', '')
+    AWS_SECRET_ACCESS_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY', '')
+    AWS_STORAGE_BUCKET_NAME = os.environ.get('AWS_STORAGE_BUCKET_NAME', '')
+    AWS_S3_ENDPOINT_URL = os.environ.get('AWS_S3_ENDPOINT_URL', '')  # MinIO: http://minio:9000
+    AWS_S3_ADDRESSING_STYLE = os.environ.get('AWS_S3_ADDRESSING_STYLE', 'path')
+    AWS_QUERYSTRING_AUTH = False

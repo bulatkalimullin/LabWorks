@@ -1,0 +1,120 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block title %}Дашборд{% endblock %}
+
+{% block content %}
+<style>
+.dash-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+.kpi-card { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 1.25rem 1.5rem; }
+.kpi-label { font-size: 0.78rem; color: #94a3b8; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; }
+.kpi-value { font-size: 2rem; font-weight: 700; color: #f1f5f9; }
+.kpi-sub { font-size: 0.8rem; color: #64748b; margin-top: 4px; }
+.section-title { font-size: 1rem; font-weight: 600; color: #e2e8f0; margin: 0 0 1rem; }
+.chart-section { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 1.25rem; margin-bottom: 2rem; }
+.bar-chart { display: flex; align-items: flex-end; gap: 4px; height: 120px; }
+.bar-wrap { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 1; }
+.bar { background: #3b82f6; border-radius: 4px 4px 0 0; width: 100%; min-height: 2px; transition: background 0.2s; }
+.bar:hover { background: #60a5fa; }
+.bar-date { font-size: 0.6rem; color: #64748b; white-space: nowrap; }
+.bar-count { font-size: 0.65rem; color: #94a3b8; }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 2rem; }
+.label-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #1e293b; }
+.label-name { flex: 1; font-size: 0.85rem; color: #e2e8f0; }
+.label-bar { height: 6px; border-radius: 3px; background: #3b82f6; }
+.label-count { font-size: 0.8rem; color: #64748b; min-width: 24px; text-align: right; }
+.sub-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.sub-table th { text-align: left; color: #64748b; padding: 6px 8px; border-bottom: 1px solid #334155; font-weight: 500; }
+.sub-table td { padding: 6px 8px; border-bottom: 1px solid #1e293b; color: #cbd5e1; }
+.sub-table tr:hover td { background: #0f172a; }
+@media (max-width: 768px) { .two-col { grid-template-columns: 1fr; } }
+</style>
+
+<h1 style="color:#f1f5f9; margin-bottom:1.5rem;">Дашборд</h1>
+
+<div class="dash-grid">
+  <div class="kpi-card">
+    <div class="kpi-label">Студентов</div>
+    <div class="kpi-value">{{ total_students }}</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Курсов</div>
+    <div class="kpi-value">{{ total_courses }}</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Заданий</div>
+    <div class="kpi-value">{{ total_assignments }}</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Всего сдач</div>
+    <div class="kpi-value">{{ total_submissions }}</div>
+    <div class="kpi-sub">{{ recent_submissions }} за 30 дней</div>
+  </div>
+</div>
+
+<div class="chart-section">
+  <div class="section-title">Сдачи по дням (последние 14 дней)</div>
+  <div class="bar-chart">
+    {% for day in subs_by_day %}
+    <div class="bar-wrap">
+      <div class="bar-count">{% if day.count %}{{ day.count }}{% endif %}</div>
+      <div class="bar" style="height:{% widthratio day.count max_daily 100 %}px" title="{{ day.date }}: {{ day.count }}"></div>
+      <div class="bar-date">{{ day.date }}</div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="two-col">
+  <div class="chart-section" style="margin-bottom:0">
+    <div class="section-title">Метки студентов</div>
+    {% if label_distribution %}
+      {% with max_count=label_distribution.0.count %}
+      {% for item in label_distribution %}
+      <div class="label-row">
+        <span class="label-name">{{ item.name }}</span>
+        <div class="label-bar" style="width:{% widthratio item.count max_count 120 %}px"></div>
+        <span class="label-count">{{ item.count }}</span>
+      </div>
+      {% endfor %}
+      {% endwith %}
+    {% else %}
+      <p style="color:#64748b; font-size:0.85rem;">Нет данных</p>
+    {% endif %}
+  </div>
+
+  <div class="chart-section" style="margin-bottom:0">
+    <div class="section-title">Топ заданий по сдачам</div>
+    {% for a in top_assignments %}
+    <div class="label-row">
+      <span class="label-name" title="{{ a.course.name }}">{{ a.title }}</span>
+      <span class="label-count">{{ a.sub_count }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="chart-section">
+  <div class="section-title">Последние сдачи</div>
+  <table class="sub-table">
+    <thead>
+      <tr>
+        <th>Студент</th>
+        <th>Задание</th>
+        <th>Курс</th>
+        <th>Дата</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in latest_submissions %}
+      <tr>
+        <td><a href="{% url 'admin:laboratory_customuser_change' s.student.id %}" style="color:#60a5fa">{{ s.student.full_name }}</a></td>
+        <td><a href="{% url 'admin:laboratory_submission_change' s.id %}" style="color:#60a5fa">{{ s.assignment.title }}</a></td>
+        <td>{{ s.assignment.course.name }}</td>
+        <td>{{ s.submitted_at|date:"d.m.Y H:i" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

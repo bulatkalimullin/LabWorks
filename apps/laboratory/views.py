@@ -111,8 +111,9 @@ def assignment_detail(request, assignment_uuid):
                 # Add file submission if it exists
                 if submission.file:
                     file_path = submission.file.path
-                    file_extension = submission.file.name.split('.')[-1]
-                    arcname = f"{group_name}/{student_name}/{submission.file.name}.{file_extension}"
+                    # submission.file.name already includes extension; avoid duplicating
+                    base_name = submission.file.name.split('/')[-1]
+                    arcname = f"{group_name}/{student_name}/{base_name}"
                     zip_file.write(file_path, arcname)
                 # Add text response as a .txt file if it exists
                 if submission.text_response:
