@@ -296,19 +296,32 @@ class AssignmentViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='events', permission_classes=[IsAuthenticated])
     def record_event(self, request, pk=None):
-        """Record OPEN_PAGE or START_WORK once per student per assignment."""
+        """Record assignment events. OPEN_PAGE/START_WORK are deduplicated; behavior events create a new record each time."""
         if request.user.is_staff:
             return Response({'detail': 'ok'})
         assignment = self.get_object()
         event_type = request.data.get('event_type', '')
-        if event_type not in ['OPEN_PAGE', 'START_WORK']:
+        valid_types = [t for t, _ in AssignmentEvent.EVENT_TYPES]
+        if event_type not in valid_types:
             return Response({'detail': 'Invalid event_type'}, status=status.HTTP_400_BAD_REQUEST)
-        exists = AssignmentEvent.objects.filter(
-            student=request.user, assignment=assignment, event_type=event_type
-        ).exists()
-        if not exists:
-            AssignmentEvent.objects.create(
+        metadata = request.data.get('metadata', {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+        # OPEN_PAGE and START_WORK are deduplicated (only once per student per assignment)
+        dedupe_types = ('OPEN_PAGE', 'START_WORK')
+        if event_type in dedupe_types:
+            exists = AssignmentEvent.objects.filter(
                 student=request.user, assignment=assignment, event_type=event_type
+            ).exists()
+            if not exists:
+                AssignmentEvent.objects.create(
+                    student=request.user, assignment=assignment,
+                    event_type=event_type, metadata=metadata,
+                )
+        else:
+            AssignmentEvent.objects.create(
+                student=request.user, assignment=assignment,
+                event_type=event_type, metadata=metadata,
             )
         return Response({'detail': 'recorded'}, status=status.HTTP_201_CREATED)
 
@@ -349,7 +362,21 @@ class SubmissionViewSet(viewsets.ModelViewSet):
             if not assignment.student_groups.filter(pk__in=user_groups).exists():
                 from rest_framework.exceptions import PermissionDenied
                 raise PermissionDenied('Нет доступа к этому заданию.')
-        submission = serializer.save(student=self.request.user)
+        # Collect behavior analytics fields from request data
+        def _int(key, default=0):
+            try:
+                return max(0, int(self.request.data.get(key, default)))
+            except (ValueError, TypeError):
+                return default
+        behavior_fields = {
+            'behavior_clipboard_changes': _int('behavior_clipboard_changes'),
+            'behavior_paste_count': _int('behavior_paste_count'),
+            'behavior_paste_chars': _int('behavior_paste_chars'),
+            'behavior_keystrokes': _int('behavior_keystrokes'),
+            'behavior_tab_switches': _int('behavior_tab_switches'),
+            'behavior_gpt_score': min(10, _int('behavior_gpt_score')),
+        }
+        submission = serializer.save(student=self.request.user, **behavior_fields)
         self._stamp_verification(submission, self.request)
 
     @staticmethod

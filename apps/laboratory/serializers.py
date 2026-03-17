@@ -219,6 +219,7 @@ class AdminSubmissionSerializer(serializers.ModelSerializer):
     file_url = serializers.SerializerMethodField()
     comments = CommentSerializer(many=True, read_only=True)
     timing = serializers.SerializerMethodField()
+    behavior_events = serializers.SerializerMethodField()
 
     class Meta:
         model = Submission
@@ -230,11 +231,17 @@ class AdminSubmissionSerializer(serializers.ModelSerializer):
             'admin_note', 'admin_flags',
             'verification_payload', 'verification_signature',
             'timing',
+            'behavior_clipboard_changes', 'behavior_paste_count', 'behavior_paste_chars',
+            'behavior_keystrokes', 'behavior_tab_switches', 'behavior_gpt_score',
+            'behavior_events',
         )
         read_only_fields = (
             'id', 'student', 'submitted_at', 'comments',
             'verification_payload', 'verification_signature', 'timing',
             'student_label', 'student_label_display',
+            'behavior_clipboard_changes', 'behavior_paste_count', 'behavior_paste_chars',
+            'behavior_keystrokes', 'behavior_tab_switches', 'behavior_gpt_score',
+            'behavior_events',
         )
 
     def get_file_url(self, obj):
@@ -272,6 +279,23 @@ class AdminSubmissionSerializer(serializers.ModelSerializer):
                 (obj.submitted_at - start_event.created_at).total_seconds()
             )
         return result
+
+    def get_behavior_events(self, obj):
+        """Return behavior events (clipboard changes, pastes, tab switches) with timestamps and metadata."""
+        behavior_types = ('CLIPBOARD_CHANGE', 'PASTE_DETECTED', 'TAB_SWITCH', 'KEYLOG_BATCH')
+        events = AssignmentEvent.objects.filter(
+            student=obj.student,
+            assignment=obj.assignment,
+            event_type__in=behavior_types,
+        ).order_by('created_at').values('event_type', 'created_at', 'metadata')
+        return [
+            {
+                'event_type': e['event_type'],
+                'created_at': e['created_at'].isoformat(),
+                'metadata': e['metadata'],
+            }
+            for e in events
+        ]
 
 
 class RegisterSerializer(serializers.Serializer):
