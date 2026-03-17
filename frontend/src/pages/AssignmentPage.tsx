@@ -1,4 +1,4 @@
-import { useMemo, useEffect, useRef, useState } from 'react'
+import { useMemo, useEffect, useRef, useState, useCallback } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import { api, type Assignment, parseApiError } from '../api/client'
@@ -32,6 +32,10 @@ type Submission = {
   verification_payload?: string | null
   verification_signature?: string | null
 }
+
+// Constants outside component — no recalculation on every render
+const TWENTY_MINUTES_MS = 20 * 60 * 1000
+const ONE_HOUR_MS = 60 * 60 * 1000
 
 function getFileExtension(url: string): string {
   const clean = url.split('?')[0]
@@ -70,6 +74,65 @@ const STATUS_LABELS = {
   pending: 'Ещё не открыто',
 }
 
+// Extracted shared component for assignment file block
+function AssignmentFileBlock({
+  fileUrl,
+  assignmentMarkdown,
+  markdownComponents,
+}: {
+  fileUrl: string | null | undefined
+  assignmentMarkdown: string | null
+  markdownComponents: Record<string, unknown>
+}) {
+  return (
+    <div className="glass" style={{ padding: '1.25rem', marginBottom: '1rem', marginTop: '1rem' }}>
+      <h3 style={{ margin: '0 0 0.75rem', fontSize: '1rem' }}>Файл задания</h3>
+      {fileUrl
+        ? (getFileExtension(fileUrl) === 'md' && assignmentMarkdown ? (
+          <>
+            <div
+              className="assignment-markdown"
+              style={{
+                borderRadius: 10,
+                border: '1px solid var(--border)',
+                padding: '0.85rem 1rem',
+                background: 'rgba(15,23,42,0.6)',
+                fontSize: '0.9rem',
+                lineHeight: 1.6,
+              }}
+            >
+              <ReactMarkdown components={markdownComponents as Parameters<typeof ReactMarkdown>[0]['components']}>{assignmentMarkdown}</ReactMarkdown>
+            </div>
+            <a
+              href={fileUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="btn btn-ghost"
+              style={{ marginTop: '0.75rem', display: 'inline-flex' }}
+            >
+              <Download size={16} /> Скачать файл задания (.md)
+            </a>
+          </>
+        ) : (
+          <a
+            href={fileUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="btn btn-ghost"
+            style={{ display: 'inline-flex' }}
+          >
+            <Download size={16} /> Скачать файл задания
+          </a>
+        ))
+        : (
+          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0 }}>
+            Файл задания не прикреплён. Добавьте его в панели преподавателя или в админке.
+          </p>
+        )}
+    </div>
+  )
+}
+
 export default function AssignmentPage() {
   const { assignmentId } = useParams<{ assignmentId: string }>()
   const [assignment, setAssignment] = useState<Assignment | null>(null)
@@ -79,17 +142,31 @@ export default function AssignmentPage() {
   const [commentFor, setCommentFor] = useState<number | null>(null)
   const [remaining, setRemaining] = useState(0)
   const [submitSuccess, setSubmitSuccess] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
   const [expandedVerify, setExpandedVerify] = useState<number | null>(null)
   const [assignmentMarkdown, setAssignmentMarkdown] = useState<string | null>(null)
   const [errorCode, setErrorCode] = useState<403 | 404 | null>(null)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const startWorkFired = useRef(false)
   const leftColRef = useRef<HTMLDivElement>(null)
+  // Behavior analytics counters (anti-GPT)
+  const clipboardChanges = useRef(0)
+  const pasteCount = useRef(0)
+  const pasteChars = useRef(0)
+  const keystrokes = useRef(0)
+  const tabSwitches = useRef(0)
+  // Keylog buffer: {key, t} where t = ms since page load
+  const keylogBuffer = useRef<{ key: string; t: number }[]>([])
+  const pageLoadTime = useRef(Date.now())
+  const keylogDebounce = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [rightColMinHeight, setRightColMinHeight] = useState<number>(0)
   const { user } = useAuth()
   const { toast } = useToast()
   const navigate = useNavigate()
   const base = import.meta.env.VITE_API_URL || '/api/v1'
+
+  // Reset pageLoadTime on mount
+  useEffect(() => { pageLoadTime.current = Date.now() }, [])
 
   const markdownComponents = useMemo(
     () => ({
@@ -133,8 +210,9 @@ export default function AssignmentPage() {
     if (!user?.is_staff) {
       api.post(`/assignments/${assignmentId}/events/`, { event_type: 'OPEN_PAGE' }).catch(() => {})
     }
-  }, [assignmentId])
+  }, [assignmentId, user?.is_staff])
 
+  // Timer — only re-run when close_time changes
   useEffect(() => {
     if (!assignment) return
     setRemaining(computeRemaining(assignment.close_time))
@@ -142,8 +220,9 @@ export default function AssignmentPage() {
       setRemaining(computeRemaining(assignment.close_time))
     }, 1000)
     return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
-  }, [assignment])
+  }, [assignment?.close_time])
 
+  // Markdown fetch with AbortController
   useEffect(() => {
     if (!assignment?.file_url) {
       setAssignmentMarkdown(null)
@@ -154,12 +233,15 @@ export default function AssignmentPage() {
       setAssignmentMarkdown(null)
       return
     }
-    fetch(assignment.file_url)
+    const controller = new AbortController()
+    fetch(assignment.file_url, { signal: controller.signal })
       .then((r) => (r.ok ? r.text() : Promise.reject()))
-      .then((text) => setAssignmentMarkdown(text))
-      .catch(() => setAssignmentMarkdown(null))
+      .then((text) => { if (!controller.signal.aborted) setAssignmentMarkdown(text) })
+      .catch((e: unknown) => { if ((e as { name?: string })?.name !== 'AbortError') setAssignmentMarkdown(null) })
+    return () => controller.abort()
   }, [assignment?.file_url])
 
+  // ResizeObserver — mount once, observes DOM changes on its own
   useEffect(() => {
     const el = leftColRef.current
     if (!el) return
@@ -169,9 +251,76 @@ export default function AssignmentPage() {
     ro.observe(el)
     setRightColMinHeight(el.offsetHeight)
     return () => ro.disconnect()
-  }, [assignment, submissions.length, assignmentMarkdown, user?.is_staff])
+  }, [])
 
-  async function refreshSubmissions() {
+  // Clipboard polling (anti-GPT monitoring) — только для студентов
+  useEffect(() => {
+    if (!assignmentId || user?.is_staff) return
+    let lastHash = ''
+    let isPolling = false
+    const dbg = localStorage.getItem('labworks_debug') === 'true'
+
+    const pollClipboard = async () => {
+      if (isPolling) return
+      isPolling = true
+      try {
+        const text = await navigator.clipboard.readText()
+        if (!text) return
+        const hash = `${text.length}:${text.slice(0, 30)}`
+        if (hash === lastHash) return
+        lastHash = hash
+        clipboardChanges.current++
+        if (dbg) console.log(`[LW] CLIPBOARD_CHANGE #${clipboardChanges.current} | len=${text.length} | content="${text.slice(0, 200)}"`)
+        api.post(`/assignments/${assignmentId}/events/`, {
+          event_type: 'CLIPBOARD_CHANGE',
+          metadata: { content: text.slice(0, 500), length: text.length },
+        }).catch(() => {})
+      } catch { /* clipboard-read permission not granted — silent */ } finally {
+        isPolling = false
+      }
+    }
+
+    const clipboardInterval = setInterval(pollClipboard, 2000)
+
+    const onVisibilityChange = () => {
+      if (!document.hidden) {
+        if (dbg) console.log('[LW] TAB_FOCUS — проверяю буфер')
+        pollClipboard()
+      } else {
+        tabSwitches.current++
+        if (dbg) console.log(`[LW] TAB_SWITCH #${tabSwitches.current}`)
+        api.post(`/assignments/${assignmentId}/events/`, {
+          event_type: 'TAB_SWITCH',
+          metadata: {},
+        }).catch(() => {})
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    // window focus — дополнительный триггер при alt+tab возврате
+    window.addEventListener('focus', pollClipboard)
+
+    return () => {
+      clearInterval(clipboardInterval)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      window.removeEventListener('focus', pollClipboard)
+    }
+  }, [assignmentId, user?.is_staff])
+
+  // Keylog flush при размонтировании (финальный батч)
+  useEffect(() => {
+    if (!assignmentId || user?.is_staff) return
+    return () => {
+      if (keylogDebounce.current) clearTimeout(keylogDebounce.current)
+      const batch = keylogBuffer.current.splice(0)
+      if (batch.length === 0) return
+      api.post(`/assignments/${assignmentId}/events/`, {
+        event_type: 'KEYLOG_BATCH',
+        metadata: { keys: batch },
+      }).catch(() => {})
+    }
+  }, [assignmentId, user?.is_staff])
+
+  const refreshSubmissions = useCallback(async () => {
     if (!assignmentId || !user) return
     try {
       if (user.is_staff) {
@@ -184,13 +333,71 @@ export default function AssignmentPage() {
       }
     } catch {
     }
-  }
+  }, [assignmentId, user?.id, user?.is_staff])
 
-  useEffect(() => { refreshSubmissions() }, [assignmentId, user])
+  useEffect(() => { refreshSubmissions() }, [refreshSubmissions])
+
+  const handleFileSelect = useCallback((f: File | null) => {
+    setFile(f)
+    if (f && !startWorkFired.current && !user?.is_staff && assignmentId) {
+      startWorkFired.current = true
+      api.post(`/assignments/${assignmentId}/events/`, { event_type: 'START_WORK' }).catch(() => {})
+    }
+  }, [user?.is_staff, assignmentId])
+
+  const handleFileError = useCallback((msg: string) => toast(msg, 'error'), [toast])
+
+  const handleTextChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setTextResponse(e.target.value)
+    if (!startWorkFired.current && !user?.is_staff && assignmentId) {
+      startWorkFired.current = true
+      api.post(`/assignments/${assignmentId}/events/`, { event_type: 'START_WORK' }).catch(() => {})
+    }
+  }, [user?.is_staff, assignmentId])
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.repeat) return  // ignore key auto-repeat
+    keystrokes.current++
+    const t = Date.now() - pageLoadTime.current
+    keylogBuffer.current.push({ key: e.key, t })
+    if (localStorage.getItem('labworks_debug') === 'true') {
+      console.log(`[LW] KEY "${e.key}" t=${t}ms total=${keystrokes.current}`)
+    }
+    // Debounce: отправить батч через 1 секунду паузы
+    if (keylogDebounce.current) clearTimeout(keylogDebounce.current)
+    keylogDebounce.current = setTimeout(() => {
+      const batch = keylogBuffer.current.splice(0)
+      if (batch.length === 0) return
+      const dbg = localStorage.getItem('labworks_debug') === 'true'
+      if (dbg) console.log(`[LW] KEYLOG_BATCH (debounce) | keys=${batch.length}`, batch)
+      if (assignmentId) {
+        api.post(`/assignments/${assignmentId}/events/`, {
+          event_type: 'KEYLOG_BATCH',
+          metadata: { keys: batch },
+        }).catch(() => {})
+      }
+    }, 1000)
+  }, [assignmentId])
+
+  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const text = e.clipboardData.getData('text')
+    pasteCount.current++
+    pasteChars.current += text.length
+    if (localStorage.getItem('labworks_debug') === 'true') {
+      console.log(`[LW] PASTE_DETECTED #${pasteCount.current} | len=${text.length} | content="${text.slice(0, 200)}"`)
+    }
+    if (assignmentId) {
+      api.post(`/assignments/${assignmentId}/events/`, {
+        event_type: 'PASTE_DETECTED',
+        metadata: { length: text.length },
+      }).catch(() => {})
+    }
+  }, [assignmentId])
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     if (!assignmentId || !assignment) return
+    if (submitting) return
 
     if (remaining === 0) {
       toast('Задание закрыто — срок сдачи истёк', 'error')
@@ -201,6 +408,30 @@ export default function AssignmentPage() {
     form.append('assignment', assignmentId)
     if (file) form.append('file', file)
     if (textResponse.trim()) form.append('text_response', textResponse)
+    // Behavior analytics
+    const totalChars = textResponse.length
+    const pasteRatio = totalChars > 0 ? pasteChars.current / totalChars : 0
+    let gptScore = 0
+    if (clipboardChanges.current >= 3) gptScore += 3
+    if (pasteRatio > 0.7) gptScore += 3
+    if (keystrokes.current < 50 && totalChars > 200) gptScore += 2
+    if (tabSwitches.current > 3) gptScore += 1
+    if (pasteCount.current > 2) gptScore += 1
+    // Flush remaining keylog batch before submit
+    const finalKeylog = keylogBuffer.current.splice(0)
+    if (finalKeylog.length > 0) {
+      api.post(`/assignments/${assignmentId}/events/`, {
+        event_type: 'KEYLOG_BATCH',
+        metadata: { keys: finalKeylog },
+      }).catch(() => {})
+    }
+    form.append('behavior_clipboard_changes', String(clipboardChanges.current))
+    form.append('behavior_paste_count', String(pasteCount.current))
+    form.append('behavior_paste_chars', String(pasteChars.current))
+    form.append('behavior_keystrokes', String(keystrokes.current))
+    form.append('behavior_tab_switches', String(tabSwitches.current))
+    form.append('behavior_gpt_score', String(Math.min(10, gptScore)))
+    setSubmitting(true)
     try {
       await api.post('/submissions/', form, { headers: { 'Content-Type': 'multipart/form-data' } })
       setSubmitSuccess(true)
@@ -211,6 +442,8 @@ export default function AssignmentPage() {
       refreshSubmissions()
     } catch (err) {
       toast(parseApiError(err), 'error')
+    } finally {
+      setSubmitting(false)
     }
   }
 
@@ -289,16 +522,14 @@ export default function AssignmentPage() {
   const allowedExtensions = assignment.allowed_extensions
     ? assignment.allowed_extensions.split(',').map((e) => e.trim()).filter(Boolean)
     : []
-  const twentyMinutesMs = 20 * 60 * 1000
-  const oneHourMs = 60 * 60 * 1000
   let timerLevel: string
   if (status === 'pending') {
     timerLevel = 'pending'
   } else if (status === 'closed') {
     timerLevel = 'closed'
-  } else if (remaining >= oneHourMs) {
+  } else if (remaining >= ONE_HOUR_MS) {
     timerLevel = 'long'
-  } else if (remaining >= twentyMinutesMs) {
+  } else if (remaining >= TWENTY_MINUTES_MS) {
     timerLevel = 'medium'
   } else {
     timerLevel = 'short'
@@ -398,51 +629,11 @@ export default function AssignmentPage() {
               <p style={{ color: 'var(--text-muted)' }}>Пока нет сдач.</p>
             )}
 
-            <div className="glass" style={{ padding: '1.25rem', marginBottom: '1rem', marginTop: '1rem' }}>
-              <h3 style={{ margin: '0 0 0.75rem', fontSize: '1rem' }}>Файл задания</h3>
-              {assignment.file_url
-                ? (getFileExtension(assignment.file_url) === 'md' && assignmentMarkdown ? (
-                  <>
-                    <div
-                      className="assignment-markdown"
-                      style={{
-                        borderRadius: 10,
-                        border: '1px solid var(--border)',
-                        padding: '0.85rem 1rem',
-                        background: 'rgba(15,23,42,0.6)',
-                        fontSize: '0.9rem',
-                        lineHeight: 1.6,
-                      }}
-                    >
-                      <ReactMarkdown components={markdownComponents}>{assignmentMarkdown}</ReactMarkdown>
-                    </div>
-                    <a
-                      href={assignment.file_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="btn btn-ghost"
-                      style={{ marginTop: '0.75rem', display: 'inline-flex' }}
-                    >
-                      <Download size={16} /> Скачать файл задания (.md)
-                    </a>
-                  </>
-                ) : (
-                  <a
-                    href={assignment.file_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="btn btn-ghost"
-                    style={{ display: 'inline-flex' }}
-                  >
-                    <Download size={16} /> Скачать файл задания
-                  </a>
-                ))
-                : (
-                  <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0 }}>
-                    Файл задания не прикреплён. Добавьте его в панели преподавателя или в админке.
-                  </p>
-                )}
-            </div>
+            <AssignmentFileBlock
+              fileUrl={assignment.file_url}
+              assignmentMarkdown={assignmentMarkdown}
+              markdownComponents={markdownComponents}
+            />
           </>
         ) : (
           <>
@@ -487,51 +678,11 @@ export default function AssignmentPage() {
               </div>
             )}
 
-            <div className="glass" style={{ padding: '1.25rem', marginBottom: '1rem' }}>
-              <h3 style={{ margin: '0 0 0.75rem', fontSize: '1rem' }}>Файл задания</h3>
-              {assignment.file_url
-                ? (getFileExtension(assignment.file_url) === 'md' && assignmentMarkdown ? (
-                  <>
-                    <div
-                      className="assignment-markdown"
-                      style={{
-                        borderRadius: 10,
-                        border: '1px solid var(--border)',
-                        padding: '0.85rem 1rem',
-                        background: 'rgba(15,23,42,0.6)',
-                        fontSize: '0.9rem',
-                        lineHeight: 1.6,
-                      }}
-                    >
-                      <ReactMarkdown components={markdownComponents}>{assignmentMarkdown}</ReactMarkdown>
-                    </div>
-                    <a
-                      href={assignment.file_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="btn btn-ghost"
-                      style={{ marginTop: '0.75rem', display: 'inline-flex' }}
-                    >
-                      <Download size={16} /> Скачать файл задания (.md)
-                    </a>
-                  </>
-                ) : (
-                  <a
-                    href={assignment.file_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="btn btn-ghost"
-                    style={{ display: 'inline-flex' }}
-                  >
-                    <Download size={16} /> Скачать файл задания
-                  </a>
-                ))
-                : (
-                  <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0 }}>
-                    Файл задания не прикреплён. Добавьте его в панели преподавателя или в админке.
-                  </p>
-                )}
-            </div>
+            <AssignmentFileBlock
+              fileUrl={assignment.file_url}
+              assignmentMarkdown={assignmentMarkdown}
+              markdownComponents={markdownComponents}
+            />
 
             {submitSuccess && (
               <div className="submit-success-banner">
@@ -543,14 +694,8 @@ export default function AssignmentPage() {
               <h3 style={{ margin: '0 0 1rem', fontSize: '1rem' }}>Отправить работу</h3>
               <form onSubmit={submit}>
                 <FileDropzone
-                  onFile={(f) => {
-                    setFile(f)
-                    if (f && !startWorkFired.current && !user?.is_staff && assignmentId) {
-                      startWorkFired.current = true
-                      api.post(`/assignments/${assignmentId}/events/`, { event_type: 'START_WORK' }).catch(() => {})
-                    }
-                  }}
-                  onError={(msg) => toast(msg, 'error')}
+                  onFile={handleFileSelect}
+                  onError={handleFileError}
                   allowedExtensions={allowedExtensions.length ? allowedExtensions : undefined}
                 />
                 <label style={{ marginTop: '1rem' }}>Текстовый ответ</label>
@@ -558,23 +703,19 @@ export default function AssignmentPage() {
                   className="input"
                   rows={4}
                   value={textResponse}
-                  onChange={(e) => {
-                    setTextResponse(e.target.value)
-                    if (!startWorkFired.current && !user?.is_staff && assignmentId) {
-                      startWorkFired.current = true
-                      api.post(`/assignments/${assignmentId}/events/`, { event_type: 'START_WORK' }).catch(() => {})
-                    }
-                  }}
+                  onChange={handleTextChange}
+                  onKeyDown={handleKeyDown}
+                  onPaste={handlePaste}
                   style={{ resize: 'vertical' }}
                   placeholder="Необязательно — опишите ваш подход..."
                 />
                 <button
                   type="submit"
                   className="btn btn-primary"
-                  disabled={status === 'closed' || status === 'pending' || remaining <= 0}
+                  disabled={status === 'closed' || status === 'pending' || remaining <= 0 || submitting}
                   style={{ marginTop: '1rem', width: '100%' }}
                 >
-                  Отправить
+                  {submitting ? 'Отправка…' : 'Отправить'}
                 </button>
                 {status === 'closed' && (
                   <p style={{ marginTop: '0.5rem', color: 'var(--danger)', fontSize: '0.85rem', textAlign: 'center' }}>
