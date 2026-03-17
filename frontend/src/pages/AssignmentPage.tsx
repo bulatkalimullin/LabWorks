@@ -296,13 +296,48 @@ export default function AssignmentPage() {
       }
     }
     document.addEventListener('visibilitychange', onVisibilityChange)
-    // window focus — дополнительный триггер при alt+tab возврате
-    window.addEventListener('focus', pollClipboard)
+
+    // alt+tab возврат: 200ms задержка чтобы браузер успел передать права на clipboard
+    const onWindowFocus = () => setTimeout(pollClipboard, 200)
+    window.addEventListener('focus', onWindowFocus)
+
+    // document paste — работает без clipboard-read permission, через e.clipboardData
+    const onDocumentPaste = (e: ClipboardEvent) => {
+      const text = e.clipboardData?.getData('text') ?? ''
+      if (!text) return
+      const hash = `${text.length}:${text.slice(0, 30)}`
+      if (hash === lastHash) return
+      lastHash = hash
+      clipboardChanges.current++
+      if (dbg) console.log(`[LW] CLIPBOARD_CHANGE (paste) #${clipboardChanges.current} | len=${text.length} | content="${text.slice(0, 200)}"`)
+      api.post(`/assignments/${assignmentId}/events/`, {
+        event_type: 'CLIPBOARD_CHANGE',
+        metadata: { content: text.slice(0, 500), length: text.length },
+      }).catch(() => {})
+    }
+    document.addEventListener('paste', onDocumentPaste)
+
+    // copy — студент скопировал текст прямо со страницы задания
+    const onCopy = () => setTimeout(pollClipboard, 100)
+    document.addEventListener('copy', onCopy)
+
+    // throttled click — ловим момент когда студент кликает по странице после возврата
+    let lastClickPoll = 0
+    const onDocumentClick = () => {
+      const now = Date.now()
+      if (now - lastClickPoll < 3000) return
+      lastClickPoll = now
+      pollClipboard()
+    }
+    document.addEventListener('click', onDocumentClick)
 
     return () => {
       clearInterval(clipboardInterval)
       document.removeEventListener('visibilitychange', onVisibilityChange)
-      window.removeEventListener('focus', pollClipboard)
+      window.removeEventListener('focus', onWindowFocus)
+      document.removeEventListener('paste', onDocumentPaste)
+      document.removeEventListener('copy', onCopy)
+      document.removeEventListener('click', onDocumentClick)
     }
   }, [assignmentId, user?.is_staff])
 
