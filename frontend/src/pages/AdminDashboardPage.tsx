@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { motion } from 'framer-motion'
 import { BookOpen, FileText, TrendingUp, Users } from 'lucide-react'
 import { api, type AdminStats, LABEL_COLORS } from '../api/client'
 
@@ -7,10 +6,8 @@ function StatCard({ label, value, sub, icon: Icon }: {
   label: string; value: number; sub?: string; icon: React.ElementType
 }) {
   return (
-    <motion.div
+    <div
       className="glass admin-stat-card"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
     >
       <div className="admin-stat-icon"><Icon size={20} /></div>
       <div className="admin-stat-body">
@@ -18,7 +15,7 @@ function StatCard({ label, value, sub, icon: Icon }: {
         <div className="admin-stat-value">{value.toLocaleString('ru')}</div>
         {sub && <div className="admin-stat-sub">{sub}</div>}
       </div>
-    </motion.div>
+    </div>
   )
 }
 

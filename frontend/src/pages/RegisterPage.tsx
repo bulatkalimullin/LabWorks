@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { motion } from 'framer-motion'
-import { Shield, CheckCircle2 } from 'lucide-react'
+import { Shield, CheckCircle2, Lock } from 'lucide-react'
 import { useAuth, registerApi } from '../context/AuthContext'
+import { usePublicSettings } from '../context/PublicSettingsContext'
 import { api, parseApiError } from '../api/client'
 import { useToast } from '../context/ToastContext'
 import Modal from '../components/Modal'
@@ -17,6 +17,7 @@ export default function RegisterPage() {
   const [groups, setGroups] = useState<Group[]>([])
   const [show2faModal, setShow2faModal] = useState(false)
   const { setTokens, setUser } = useAuth()
+  const { registration_open } = usePublicSettings()
   const navigate = useNavigate()
   const { toast } = useToast()
 
@@ -42,9 +43,24 @@ export default function RegisterPage() {
     }
   }
 
+  if (!registration_open) {
+    return (
+      <div className="container-narrow page-enter" style={{ paddingTop: '2rem', textAlign: 'center' }}>
+        <div className="glass" style={{ padding: '2rem' }}>
+          <Lock size={48} style={{ opacity: 0.6, marginBottom: 16 }} />
+          <h1 style={{ marginTop: 0 }}>Регистрация закрыта</h1>
+          <p style={{ color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
+            В данный момент регистрация новых пользователей недоступна. Обратитесь к администратору.
+          </p>
+          <Link to="/login" className="btn btn-primary">Войти</Link>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <>
-      <motion.div className="container-narrow page-enter" style={{ paddingTop: '2rem' }}>
+      <div className="container-narrow page-enter" style={{ paddingTop: '2rem' }}>
         <div className="glass" style={{ padding: '2rem' }}>
           <h1 style={{ marginTop: 0 }}>Регистрация</h1>
           <form onSubmit={handleSubmit}>
@@ -80,7 +96,7 @@ export default function RegisterPage() {
             <Link to="/login">Уже есть аккаунт</Link>
           </p>
         </div>
-      </motion.div>
+      </div>
 
       <Modal open={show2faModal} onClose={() => { setShow2faModal(false); navigate('/') }} title="Защитите аккаунт">
         <div style={{ textAlign: 'center', padding: '0.5rem 0' }}>

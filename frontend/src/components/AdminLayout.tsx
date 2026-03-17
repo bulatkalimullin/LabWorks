@@ -1,5 +1,5 @@
 import { NavLink, useNavigate } from 'react-router-dom'
-import { BookOpen, FileText, Home, LogOut, Users } from 'lucide-react'
+import { BookOpen, FileText, Home, LogOut, Settings, Users } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import type { ReactNode } from 'react'
 
@@ -7,6 +7,7 @@ const navItems = [
   { to: '/admin', label: 'Дашборд', icon: Home, exact: true },
   { to: '/admin/submissions', label: 'Сдачи', icon: FileText, exact: false },
   { to: '/admin/users', label: 'Студенты', icon: Users, exact: false },
+  { to: '/admin/settings', label: 'Настройки', icon: Settings, exact: false },
   { to: '/', label: 'К пользователю', icon: BookOpen, exact: false },
 ]
 

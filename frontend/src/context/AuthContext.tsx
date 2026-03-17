@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
+import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react'
 import { api } from '../api/client'
 
 export type User = { id: number; username: string; full_name: string; is_staff: boolean; totp_enabled?: boolean }
@@ -37,6 +37,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem('user')
     setUser(null)
   }, [])
+
+  // Single-session: hidden auth check every 5s; on 401 (e.g. new login elsewhere) logout
+  useEffect(() => {
+    const hasAuth = !!user && !!localStorage.getItem('access')
+    if (!hasAuth) return
+    const id = setInterval(() => {
+      const refresh = localStorage.getItem('refresh')
+      if (!refresh) return
+      api.post('/auth/sync/', { r: refresh }).catch((err: unknown) => {
+        const status = (err as { response?: { status?: number } })?.response?.status
+        if (status === 401) {
+          logout()
+          window.location.replace('/login')
+        }
+      })
+    }, 5000)
+    return () => clearInterval(id)
+  }, [user, logout])
 
   return (
     <AuthContext.Provider

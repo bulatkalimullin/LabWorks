@@ -1,9 +1,6 @@
 import { useMemo, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { motion, AnimatePresence } from 'framer-motion'
 import ReactMarkdown from 'react-markdown'
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
-import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { api, type Assignment, parseApiError } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
@@ -94,26 +91,31 @@ export default function AssignmentPage() {
   const navigate = useNavigate()
   const base = import.meta.env.VITE_API_URL || '/api/v1'
 
-  const markdownComponents = useMemo(() => ({
-    code({ node, className, children, ...props }: { node?: unknown; className?: string; children?: React.ReactNode }) {
-      const match = /language-(\w+)/.exec(className || '')
-      const codeString = String(children ?? '').replace(/\n$/, '')
-      return match ? (
-        <SyntaxHighlighter
-          style={oneDark}
-          language={match[1]}
-          PreTag="div"
-          customStyle={{ margin: 0, borderRadius: 8, fontSize: '0.85rem' }}
-          codeTagProps={{ style: {} }}
-          {...props}
-        >
-          {codeString}
-        </SyntaxHighlighter>
-      ) : (
-        <code className="assignment-markdown-inline-code" {...props}>{children}</code>
-      )
-    },
-  }), [])
+  const markdownComponents = useMemo(
+    () => ({
+      code({
+        className,
+        children,
+        ...props
+      }: { className?: string; children?: React.ReactNode }) {
+        const codeString = String(children ?? '')
+        const isBlock = (className || '').includes('language-') || codeString.includes('\n')
+        if (isBlock) {
+          return (
+            <pre className="assignment-code-block">
+              <code {...props}>{codeString}</code>
+            </pre>
+          )
+        }
+        return (
+          <code className="assignment-markdown-inline-code" {...props}>
+            {children}
+          </code>
+        )
+      },
+    }),
+    [],
+  )
 
   useEffect(() => {
     if (!assignmentId) return
@@ -531,18 +533,11 @@ export default function AssignmentPage() {
                 )}
             </div>
 
-            <AnimatePresence>
-              {submitSuccess && (
-                <motion.div
-                  className="submit-success-banner"
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                >
-                  <CheckCircle2 size={20} /> Работа принята!
-                </motion.div>
-              )}
-            </AnimatePresence>
+            {submitSuccess && (
+              <div className="submit-success-banner">
+                <CheckCircle2 size={20} /> Работа принята!
+              </div>
+            )}
 
             <div className="glass" style={{ padding: '1.25rem' }}>
               <h3 style={{ margin: '0 0 1rem', fontSize: '1rem' }}>Отправить работу</h3>
@@ -659,11 +654,9 @@ function AssignmentForbidden() {
   const navigate = useNavigate()
   return (
     <div className="page-enter error-page-wrap">
-      <motion.div
+      <div
         className="glass"
         style={{ padding: '2rem', textAlign: 'center' }}
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
       >
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1.25rem' }}>
           <div
@@ -704,7 +697,7 @@ function AssignmentForbidden() {
             Аккаунт
           </button>
         </div>
-      </motion.div>
+      </div>
     </div>
   )
 }
@@ -713,14 +706,12 @@ function AssignmentNotFound() {
   const navigate = useNavigate()
   return (
     <div className="page-enter error-page-wrap">
-      <motion.div
+      <div
         className="glass"
         style={{ padding: '2rem', textAlign: 'center' }}
-        initial={{ opacity: 0, y: 18 }}
-        animate={{ opacity: 1, y: 0 }}
       >
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1.25rem' }}>
-          <motion.div
+          <div
             style={{
               width: 80,
               height: 80,
@@ -732,11 +723,9 @@ function AssignmentNotFound() {
               alignItems: 'center',
               justifyContent: 'center',
             }}
-            animate={{ scale: [1, 1.06, 1] }}
-            transition={{ duration: 2.2, repeat: Infinity, ease: 'easeInOut' }}
           >
             <Search size={38} style={{ color: 'var(--text)' }} />
-          </motion.div>
+          </div>
         </div>
         <h1 className="error-title">Задание не найдено (404)</h1>
         <p className="error-subtitle">
@@ -758,7 +747,7 @@ function AssignmentNotFound() {
             Назад
           </button>
         </div>
-      </motion.div>
+      </div>
     </div>
   )
 }

@@ -1,15 +1,12 @@
 import { Link } from 'react-router-dom'
-import { motion } from 'framer-motion'
 import { Shield } from 'lucide-react'
 
 export default function ForbiddenPage() {
   return (
     <div className="page-enter error-page-wrap">
-      <motion.div
+      <div
         className="glass"
         style={{ padding: '2rem', textAlign: 'center' }}
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
       >
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1.25rem' }}>
           <div
@@ -38,7 +35,7 @@ export default function ForbiddenPage() {
             На главную
           </Link>
         </div>
-      </motion.div>
+      </div>
     </div>
   )
 }

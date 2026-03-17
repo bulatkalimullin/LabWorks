@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { motion } from 'framer-motion'
 import { useAuth, loginApi } from '../context/AuthContext'
+import { usePublicSettings } from '../context/PublicSettingsContext'
 import { useToast } from '../context/ToastContext'
 import { parseApiError } from '../api/client'
 
 export default function LoginPage() {
+  const { registration_open } = usePublicSettings()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [totpCode, setTotpCode] = useState('')
@@ -39,11 +40,9 @@ export default function LoginPage() {
   }
 
   return (
-    <motion.div
-      className="container-narrow page-enter"
+    <div
+      className={`container-narrow page-enter${shake ? ' login-shake' : ''}`}
       style={{ paddingTop: '3rem' }}
-      animate={shake ? { x: [0, -6, 6, -6, 6, 0] } : {}}
-      transition={{ duration: 0.4 }}
     >
       <div className="glass" style={{ padding: '2rem' }}>
         <h1 style={{ marginTop: 0 }}>Вход</h1>
@@ -66,11 +65,10 @@ export default function LoginPage() {
           <button type="submit" className="btn btn-primary" style={{ width: '100%' }}>Войти</button>
         </form>
         <p style={{ marginTop: '1rem', textAlign: 'center' }}>
-          <Link to="/register">Регистрация</Link>
-          {' · '}
+          {registration_open && <><Link to="/register">Регистрация</Link>{' · '}</>}
           <Link to="/forgot-password">Сброс пароля</Link>
         </p>
       </div>
-    </motion.div>
+    </div>
   )
 }

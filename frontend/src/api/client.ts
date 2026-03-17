@@ -18,7 +18,12 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (r) => r,
   async (err) => {
-    if (err.response?.status === 401 && localStorage.getItem('refresh')) {
+    const isSyncCheck = err.config?.url?.includes('auth/sync') ?? false
+    if (
+      err.response?.status === 401 &&
+      localStorage.getItem('refresh') &&
+      !isSyncCheck
+    ) {
       try {
         const { data } = await axios.post(`${baseURL}/auth/refresh/`, {
           refresh: localStorage.getItem('refresh'),
@@ -29,6 +34,7 @@ api.interceptors.response.use(
       } catch {
         localStorage.removeItem('access')
         localStorage.removeItem('refresh')
+        window.location.replace('/login')
       }
     }
     return Promise.reject(err)

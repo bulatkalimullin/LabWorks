@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { usePublicSettings } from '../context/PublicSettingsContext'
 import { BarChart2, BookOpen, Clock, LogOut, User, Shield } from 'lucide-react'
 
 function getTokenExpirySeconds(): number | null {
@@ -31,6 +32,7 @@ function formatRemaining(seconds: number): string {
 
 export default function Navbar() {
   const { user, isAuthenticated, logout } = useAuth()
+  const { registration_open } = usePublicSettings()
   const [sessionRemaining, setSessionRemaining] = useState<number | null>(() => getTokenExpirySeconds())
 
   useEffect(() => {
@@ -75,7 +77,7 @@ export default function Navbar() {
         ) : (
           <>
             <Link to="/login">Войти</Link>
-            <Link to="/register">Регистрация</Link>
+            {registration_open && <Link to="/register">Регистрация</Link>}
           </>
         )}
       </div>

@@ -1,18 +1,12 @@
 import { Link } from 'react-router-dom'
-import { motion } from 'framer-motion'
 import { Search } from 'lucide-react'
 
 export default function NotFoundPage() {
   return (
     <div className="page-enter error-page-wrap">
-      <motion.div
-        className="glass"
-        style={{ padding: '2rem', textAlign: 'center' }}
-        initial={{ opacity: 0, y: 18 }}
-        animate={{ opacity: 1, y: 0 }}
-      >
+      <div className="glass" style={{ padding: '2rem', textAlign: 'center' }}>
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1.25rem' }}>
-          <motion.div
+          <div
             style={{
               width: 80,
               height: 80,
@@ -24,11 +18,9 @@ export default function NotFoundPage() {
               alignItems: 'center',
               justifyContent: 'center',
             }}
-            animate={{ scale: [1, 1.06, 1] }}
-            transition={{ duration: 2.2, repeat: Infinity, ease: 'easeInOut' }}
           >
             <Search size={38} style={{ color: 'var(--text)' }} />
-          </motion.div>
+          </div>
         </div>
         <h1 className="error-title">Страница не найдена (404)</h1>
         <p className="error-subtitle">
@@ -39,7 +31,7 @@ export default function NotFoundPage() {
             На главную
           </Link>
         </div>
-      </motion.div>
+      </div>
     </div>
   )
 }

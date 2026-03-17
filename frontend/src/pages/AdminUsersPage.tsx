@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { motion } from 'framer-motion'
 import { Search, Tag } from 'lucide-react'
 import { api, type AdminUser, STUDENT_LABELS, LABEL_COLORS, parseApiError } from '../api/client'
 import { useToast } from '../context/ToastContext'
@@ -75,6 +74,21 @@ export default function AdminUsersPage() {
     setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, label } : u))
   }
 
+  const { toast } = useToast()
+  const [activatingId, setActivatingId] = useState<number | null>(null)
+  async function activateUser(userId: number) {
+    setActivatingId(userId)
+    try {
+      await api.post(`/admin/users/${userId}/activate/`)
+      setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, is_active: true } : u))
+      toast('Пользователь активирован', 'success')
+    } catch (err) {
+      toast(parseApiError(err), 'error')
+    } finally {
+      setActivatingId(null)
+    }
+  }
+
   const filtered = search
     ? users.filter((u) =>
         u.username.toLowerCase().includes(search.toLowerCase()) ||
@@ -121,6 +135,7 @@ export default function AdminUsersPage() {
               <tr>
                 <th>Студент</th>
                 <th>Группы</th>
+                <th>Активен</th>
                 <th>2FA</th>
                 <th>Сдач</th>
                 <th>Дата рег.</th>
@@ -128,12 +143,9 @@ export default function AdminUsersPage() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((u, i) => (
-                <motion.tr
+              {filtered.map((u) => (
+                <tr
                   key={u.id}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: i * 0.01 }}
                 >
                   <td>
                     <div style={{ fontWeight: 500 }}>{u.full_name}</div>
@@ -141,6 +153,21 @@ export default function AdminUsersPage() {
                   </td>
                   <td style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                     {u.student_groups_names.join(', ') || '—'}
+                  </td>
+                  <td>
+                    {u.is_active ? (
+                      <span style={{ color: 'var(--success)', fontSize: '0.8rem' }}>✓</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        style={{ fontSize: '0.75rem', padding: '4px 8px' }}
+                        onClick={() => activateUser(u.id)}
+                        disabled={activatingId === u.id}
+                      >
+                        {activatingId === u.id ? '…' : 'Активировать'}
+                      </button>
+                    )}
                   </td>
                   <td>
                     <span style={{ color: u.totp_enabled ? 'var(--success)' : 'var(--danger)', fontSize: '0.8rem' }}>
@@ -154,11 +181,11 @@ export default function AdminUsersPage() {
                   <td>
                     <LabelSelect userId={u.id} currentLabel={u.label} onSaved={(l) => updateLabel(u.id, l)} />
                   </td>
-                </motion.tr>
+                </tr>
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>
+                  <td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>
                     Нет студентов по выбранным фильтрам
                   </td>
                 </tr>

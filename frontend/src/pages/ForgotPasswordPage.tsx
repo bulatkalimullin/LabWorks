@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { motion } from 'framer-motion'
 import { api } from '../api/client'
 import { useToast } from '../context/ToastContext'
 import { KeyRound, Shield } from 'lucide-react'
@@ -52,7 +51,7 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <motion.div className="container-narrow page-enter" style={{ paddingTop: '3rem' }}>
+    <div className="container-narrow page-enter" style={{ paddingTop: '3rem' }}>
       <div className="glass" style={{ padding: '2rem' }}>
         <h1 style={{ marginTop: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
           <KeyRound size={28} /> Сброс пароля
@@ -109,6 +108,6 @@ export default function ForgotPasswordPage() {
           <Link to="/login">Назад к входу</Link>
         </p>
       </div>
-    </motion.div>
+    </div>
   )
 }

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { motion } from 'framer-motion'
 import { api, type Course, type CourseImage, type Assignment } from '../api/client'
 import { useAuth } from '../context/AuthContext'
+import { usePublicSettings } from '../context/PublicSettingsContext'
 import { BookOpen, Shield, FileText } from 'lucide-react'
 
 function assignmentIsAvailable(a: Assignment): boolean {
@@ -62,6 +62,7 @@ export default function CoursesPage() {
   const [courses, setCourses] = useState<Course[]>([])
   const [assignments, setAssignments] = useState<Assignment[]>([])
   const { isAuthenticated, user } = useAuth()
+  const { registration_open } = usePublicSettings()
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -92,13 +93,13 @@ export default function CoursesPage() {
   if (!isAuthenticated) {
     return (
       <div className="container-narrow page-enter" style={{ paddingTop: '4rem', textAlign: 'center' }}>
-        <motion.div className="glass" style={{ padding: '2.5rem' }} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+        <div className="glass" style={{ padding: '2.5rem' }}>
           <BookOpen size={48} style={{ opacity: 0.6, marginBottom: 16 }} />
           <h1>Система лабораторных</h1>
           <p style={{ color: 'var(--text-muted)' }}>Войдите или зарегистрируйтесь</p>
           <Link to="/login" className="btn btn-primary" style={{ marginRight: 8 }}>Войти</Link>
-          <Link to="/register" className="btn btn-ghost">Регистрация</Link>
-        </motion.div>
+          {registration_open && <Link to="/register" className="btn btn-ghost">Регистрация</Link>}
+        </div>
       </div>
     )
   }
@@ -119,16 +120,13 @@ export default function CoursesPage() {
   }
 
   return (
-    <div style={{ padding: '1.5rem', maxWidth: 1200, margin: '0 auto' }} className="page-enter">
+    <div className="courses-page-wrap page-enter">
       <h1 style={{ marginBottom: '1.5rem' }}>Курсы</h1>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1.25rem' }}>
-        {courses.map((c, i) => (
-          <motion.div
+      <div className="courses-grid">
+        {courses.map((c) => (
+          <div
             key={c.id}
             className="glass card-hover course-card"
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.05 }}
           >
             {availableCountByCourse[c.id] != null && availableCountByCourse[c.id] > 0 && (
               <span className="course-card-badge-corner" title="Доступны задания для сдачи">
@@ -148,7 +146,7 @@ export default function CoursesPage() {
               <h3 style={{ margin: '0 0 0.75rem' }}>{c.name}</h3>
               <Link to={`/course/${c.id}`} className="btn btn-primary">Открыть</Link>
             </div>
-          </motion.div>
+          </div>
         ))}
       </div>
       {courses.length === 0 && <p style={{ color: 'var(--text-muted)' }}>Курсов пока нет.</p>}

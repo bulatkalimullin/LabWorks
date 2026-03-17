@@ -4,7 +4,6 @@ import { QRCodeSVG } from 'qrcode.react'
 import { api, parseApiError } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
-import { motion } from 'framer-motion'
 import { Shield } from 'lucide-react'
 
 export default function AccountPage() {
@@ -16,10 +15,30 @@ export default function AccountPage() {
   const [otpauthUrl, setOtpauthUrl] = useState('')
   const [enableCode, setEnableCode] = useState('')
   const [disablePassword, setDisablePassword] = useState('')
-  const [activeTab, setActiveTab] = useState<'password' | 'security'>('security')
+  const [activeTab, setActiveTab] = useState<'profile' | 'password' | 'security'>('profile')
   const [wizardStep, setWizardStep] = useState<1 | 2 | 3>(1)
+  const [fullName, setFullName] = useState('')
 
   if (!isAuthenticated) return <Navigate to="/login" replace />
+
+  const displayFullName = fullName || user?.full_name || ''
+
+  async function saveFullName(e: React.FormEvent) {
+    e.preventDefault()
+    const name = fullName.trim() || user?.full_name || ''
+    if (!name) {
+      toast('Введите ФИО', 'error')
+      return
+    }
+    try {
+      const { data } = await api.patch('/auth/profile/', { full_name: name })
+      setUser({ ...user!, full_name: data.full_name })
+      setFullName('')
+      toast('ФИО сохранено', 'success')
+    } catch (err) {
+      toast(parseApiError(err), 'error')
+    }
+  }
 
   async function changePassword(e: React.FormEvent) {
     e.preventDefault()
@@ -76,7 +95,7 @@ export default function AccountPage() {
   const isStaff = !!user?.is_staff
 
   return (
-    <motion.div className="page-enter" style={{ maxWidth: 960, margin: '0 auto', padding: '1.5rem' }}>
+    <div className="page-enter" style={{ maxWidth: 960, margin: '0 auto', padding: '1.5rem' }}>
       <h1 style={{ marginBottom: '0.5rem' }}>Аккаунт</h1>
       <p style={{ color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
         Управление паролем и двухфакторной аутентификацией.
@@ -105,6 +124,13 @@ export default function AccountPage() {
           <div className="account-tabs">
             <button
               type="button"
+              className={`tab ${activeTab === 'profile' ? 'active' : ''}`}
+              onClick={() => setActiveTab('profile')}
+            >
+              Профиль
+            </button>
+            <button
+              type="button"
               className={`tab ${activeTab === 'password' ? 'active' : ''}`}
               onClick={() => setActiveTab('password')}
             >
@@ -118,6 +144,23 @@ export default function AccountPage() {
               Безопасность (2FA)
             </button>
           </div>
+
+          {activeTab === 'profile' && (
+            <form onSubmit={saveFullName} style={{ marginTop: '1rem' }}>
+              <label>ФИО</label>
+              <input
+                className="input"
+                type="text"
+                value={displayFullName}
+                onChange={(e) => setFullName(e.target.value)}
+                placeholder="Фамилия Имя Отчество"
+                maxLength={255}
+              />
+              <button type="submit" className="btn btn-primary" style={{ marginTop: '0.75rem' }}>
+                Сохранить ФИО
+              </button>
+            </form>
+          )}
 
           {activeTab === 'password' && (
             <form onSubmit={changePassword}>
@@ -237,6 +280,6 @@ export default function AccountPage() {
           )}
         </div>
       </div>
-    </motion.div>
+    </div>
   )
 }

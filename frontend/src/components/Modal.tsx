@@ -1,4 +1,3 @@
-import { motion, AnimatePresence } from 'framer-motion'
 import { X } from 'lucide-react'
 
 export default function Modal({
@@ -13,20 +12,14 @@ export default function Modal({
   children: React.ReactNode
 }) {
   return (
-    <AnimatePresence>
+    <>
       {open && (
-        <motion.div
+        <div
           className="modal-overlay"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
           onClick={onClose}
         >
-          <motion.div
+          <div
             className="modal-content glass"
-            initial={{ opacity: 0, scale: 0.95, y: 10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 10 }}
             onClick={(e) => e.stopPropagation()}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
@@ -36,9 +29,9 @@ export default function Modal({
               </button>
             </div>
             {children}
-          </motion.div>
-        </motion.div>
+          </div>
+        </div>
       )}
-    </AnimatePresence>
+    </>
   )
 }

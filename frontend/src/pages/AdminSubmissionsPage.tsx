@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { motion } from 'framer-motion'
 import { Filter, KeyRound, Search } from 'lucide-react'
 import { api, type AdminSubmission, type Course, type Assignment, LABEL_COLORS, STUDENT_LABELS, SUBMISSION_FLAGS } from '../api/client'
 
@@ -139,12 +138,9 @@ export default function AdminSubmissionsPage() {
               </tr>
             </thead>
             <tbody>
-              {displayedSubs.map((s, i) => (
-                <motion.tr
+              {displayedSubs.map((s) => (
+                <tr
                   key={s.id}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: i * 0.01 }}
                   className="admin-table-row"
                   onClick={() => navigate(`/admin/submissions/${s.id}`)}
                 >
@@ -171,7 +167,7 @@ export default function AdminSubmissionsPage() {
                       </span>
                     )}
                   </td>
-                </motion.tr>
+                </tr>
               ))}
               {displayedSubs.length === 0 && (
                 <tr>

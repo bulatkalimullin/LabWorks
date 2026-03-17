@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { motion, AnimatePresence } from 'framer-motion'
 import { api, type Assignment, type Course } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import { ArrowLeft, ChevronLeft, ChevronRight, Clock, Shield } from 'lucide-react'
@@ -34,17 +33,11 @@ function CoursePageBackground({ images }: { images: NonNullable<Course['images']
   if (images.length === 0) return null
   return (
     <div className="course-page-bg" aria-hidden>
-      <AnimatePresence mode="wait" initial={false}>
-        <motion.div
-          key={images[index].id}
-          className="course-page-bg-slide"
-          style={{ backgroundImage: `url(${images[index].image})` }}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 1 }}
-        />
-      </AnimatePresence>
+      <div
+        key={images[index].id}
+        className="course-page-bg-slide"
+        style={{ backgroundImage: `url(${images[index].image})` }}
+      />
     </div>
   )
 }
@@ -77,18 +70,12 @@ function CourseGallery({ images }: { images: NonNullable<Course['images']> }) {
   return (
     <div className="course-gallery">
       <div className="course-gallery-main">
-        <AnimatePresence mode="wait">
-          <motion.img
-            key={images[current].id}
-            src={images[current].image}
-            alt={images[current].title || ''}
-            className="course-gallery-img"
-            initial={{ opacity: 0, scale: 1.03 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.97 }}
-            transition={{ duration: 0.4 }}
-          />
-        </AnimatePresence>
+        <img
+          key={images[current].id}
+          src={images[current].image}
+          alt={images[current].title || ''}
+          className="course-gallery-img"
+        />
         {images[current].title && (
           <div className="course-gallery-caption">{images[current].title}</div>
         )}
@@ -179,16 +166,13 @@ export default function CourseDetailPage() {
 
       <h2 style={{ marginBottom: '0.75rem', fontSize: '1.1rem', color: 'var(--text-muted)' }}>Задания</h2>
       <ul style={{ listStyle: 'none', padding: 0 }}>
-        {assignments.map((a, i) => {
+        {assignments.map((a) => {
           const status = getStatus(a)
           return (
-            <motion.li
+            <li
               key={a.id}
               className="glass card-hover"
               style={{ marginBottom: '0.75rem', padding: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}
-              initial={{ opacity: 0, x: -12 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: i * 0.04 }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
                 <Clock size={16} style={{ flexShrink: 0, opacity: 0.6 }} />
@@ -206,7 +190,7 @@ export default function CourseDetailPage() {
                   Открыть
                 </Link>
               </div>
-            </motion.li>
+            </li>
           )
         })}
       </ul>
