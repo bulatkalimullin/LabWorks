@@ -2,10 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft, ArrowRight, CheckCircle2, ChevronLeft,
-  Copy, Download, Eye, KeyRound, MessageSquare, Save, Shield, Tag, User,
+  Clipboard, Copy, Download, Eye, KeyRound, MessageSquare, Monitor, Save, Shield, Tag, User,
 } from 'lucide-react'
 import {
-  api, type AdminSubmission, STUDENT_LABELS, LABEL_COLORS,
+  api, type AdminSubmission, type BehaviorEvent, STUDENT_LABELS, LABEL_COLORS,
   SUBMISSION_FLAGS, parseApiError,
 } from '../api/client'
 import { useToast } from '../context/ToastContext'
@@ -85,6 +85,126 @@ function TimingBar({ timing }: { timing: AdminSubmission['timing'] }) {
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+const EVENT_LABELS: Record<BehaviorEvent['event_type'], string> = {
+  CLIPBOARD_CHANGE: 'Изменение буфера',
+  PASTE_DETECTED: 'Вставка в форму',
+  TAB_SWITCH: 'Смена вкладки',
+  KEYLOG_BATCH: 'Батч нажатий',
+}
+
+function gptScoreColor(score: number): string {
+  if (score <= 3) return '#22c55e'
+  if (score <= 6) return '#f59e0b'
+  return '#ef4444'
+}
+
+function BehaviorAnalytics({ submission }: { submission: AdminSubmission }) {
+  const {
+    behavior_clipboard_changes,
+    behavior_paste_count,
+    behavior_paste_chars,
+    behavior_keystrokes,
+    behavior_tab_switches,
+    behavior_gpt_score,
+    behavior_events,
+  } = submission
+
+  const hasData = behavior_clipboard_changes > 0 || behavior_paste_count > 0
+    || behavior_keystrokes > 0 || behavior_tab_switches > 0
+
+  const scoreColor = gptScoreColor(behavior_gpt_score)
+
+  return (
+    <div className="glass admin-detail-section">
+      <div className="admin-section-title"><Monitor size={15} /> Поведенческий анализ</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+        <div style={{
+          background: `${scoreColor}22`,
+          color: scoreColor,
+          border: `1px solid ${scoreColor}55`,
+          borderRadius: 8,
+          padding: '4px 14px',
+          fontWeight: 700,
+          fontSize: '1.1rem',
+        }}>
+          GPT Score: {behavior_gpt_score}/10
+        </div>
+        {!hasData && (
+          <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+            Нет данных (мониторинг не активирован или сдача без текстового ответа)
+          </span>
+        )}
+      </div>
+
+      {hasData && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, marginBottom: 14 }}>
+          {[
+            { label: 'Изменений буфера', value: behavior_clipboard_changes, icon: <Clipboard size={13} /> },
+            { label: 'Вставок в форму', value: behavior_paste_count, icon: <Copy size={13} /> },
+            { label: 'Символов вставлено', value: behavior_paste_chars, icon: <Copy size={13} /> },
+            { label: 'Нажатий клавиш', value: behavior_keystrokes, icon: <Eye size={13} /> },
+            { label: 'Смен вкладки', value: behavior_tab_switches, icon: <Monitor size={13} /> },
+          ].map(({ label, value, icon }) => (
+            <div key={label} style={{
+              background: 'rgba(0,0,0,0.2)',
+              borderRadius: 8,
+              padding: '8px 12px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              fontSize: '0.85rem',
+            }}>
+              <span style={{ color: 'var(--text-muted)' }}>{icon}</span>
+              <span style={{ flex: 1, color: 'var(--text-muted)' }}>{label}</span>
+              <strong>{value}</strong>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {behavior_events.length > 0 && (
+        <>
+          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 6 }}>
+            История событий ({behavior_events.length})
+          </div>
+          <div style={{ maxHeight: 280, overflowY: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+              <thead>
+                <tr style={{ color: 'var(--text-muted)', textAlign: 'left', borderBottom: '1px solid var(--border)' }}>
+                  <th style={{ padding: '4px 8px', fontWeight: 500 }}>Время</th>
+                  <th style={{ padding: '4px 8px', fontWeight: 500 }}>Событие</th>
+                  <th style={{ padding: '4px 8px', fontWeight: 500 }}>Содержимое</th>
+                </tr>
+              </thead>
+              <tbody>
+                {behavior_events.map((ev, i) => (
+                  <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
+                    <td style={{ padding: '5px 8px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                      {new Date(ev.created_at).toLocaleTimeString('ru')}
+                    </td>
+                    <td style={{ padding: '5px 8px', whiteSpace: 'nowrap' }}>
+                      {EVENT_LABELS[ev.event_type]}
+                    </td>
+                    <td style={{ padding: '5px 8px', color: 'var(--text-muted)', fontFamily: 'monospace', fontSize: '0.75rem', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {ev.event_type === 'KEYLOG_BATCH' && ev.metadata.keys
+                        ? `${ev.metadata.keys.length} клавиш — ${ev.metadata.keys.slice(0, 40).map(k => k.key === ' ' ? '·' : k.key.length === 1 ? k.key : `[${k.key}]`).join('')}${ev.metadata.keys.length > 40 ? '…' : ''}`
+                        : ev.metadata.content
+                          ? ev.metadata.content
+                          : ev.metadata.length != null
+                            ? `${ev.metadata.length} символов`
+                            : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -382,6 +502,8 @@ export default function AdminSubmissionDetailPage() {
             <div className="admin-section-title"><Eye size={15} /> Хронология работы</div>
             <TimingBar timing={submission.timing} />
           </div>
+
+          <BehaviorAnalytics submission={submission} />
 
           <div className="glass admin-detail-section">
             <div className="admin-section-title"><Tag size={15} /> Флаги сдачи</div>

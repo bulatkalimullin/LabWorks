@@ -144,6 +144,12 @@ export const SUBMISSION_FLAGS: { code: string; name: string }[] = [
   { code: 'strong_work', name: 'Сильная работа' },
 ]
 
+export type BehaviorEvent = {
+  event_type: 'CLIPBOARD_CHANGE' | 'PASTE_DETECTED' | 'TAB_SWITCH' | 'KEYLOG_BATCH'
+  created_at: string
+  metadata: { content?: string; length?: number; keys?: { key: string; t: number }[]; [key: string]: unknown }
+}
+
 export type AdminSubmission = {
   id: number
   assignment: string
@@ -169,6 +175,13 @@ export type AdminSubmission = {
     time_from_view_to_submit: number | null
     time_from_start_to_submit: number | null
   }
+  behavior_clipboard_changes: number
+  behavior_paste_count: number
+  behavior_paste_chars: number
+  behavior_keystrokes: number
+  behavior_tab_switches: number
+  behavior_gpt_score: number
+  behavior_events: BehaviorEvent[]
 }
 
 export type AdminComment = {
