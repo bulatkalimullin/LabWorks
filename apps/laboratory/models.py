@@ -172,3 +172,28 @@ class LoginLog(models.Model):
 
     def __str__(self):
         return f"{self.user.username} @ {self.created_at:%Y-%m-%d %H:%M:%S}"
+
+
+class SiteSettings(models.Model):
+    """Singleton: одна запись с настройками логики сайта (id=1)."""
+    registration_open = models.BooleanField(
+        default=True,
+        verbose_name='Регистрация открыта',
+        help_text='При выключении регистрация через API недоступна; новых пользователей добавляет только админ, активация вручную.',
+    )
+
+    class Meta:
+        verbose_name = 'Настройки сайта'
+        verbose_name_plural = 'Настройки сайта'
+
+    def __str__(self):
+        return 'Настройки сайта'
+
+
+def get_site_settings():
+    """Возвращает единственный экземпляр настроек (singleton)."""
+    settings_obj, _ = SiteSettings.objects.get_or_create(
+        id=1,
+        defaults={'registration_open': True},
+    )
+    return settings_obj

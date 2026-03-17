@@ -13,9 +13,10 @@ from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
 import pyotp
 
-from .models import Course, Assignment, Submission, StudentGroup, Comment, CustomUser, AssignmentEvent, STUDENT_LABELS
+from .models import Course, Assignment, Submission, StudentGroup, Comment, CustomUser, AssignmentEvent, STUDENT_LABELS, get_site_settings
 from .serializers import (
     CourseSerializer,
     AssignmentSerializer,
@@ -28,10 +29,12 @@ from .serializers import (
     CommentSerializer,
     TokenObtainPairWith2FASerializer,
     PasswordChangeSerializer,
+    ProfileUpdateSerializer,
     PasswordResetRequestSerializer,
     PasswordResetConfirmSerializer,
     TwoFAEnableSerializer,
     TwoFADisableSerializer,
+    _persist_refresh_token,
 )
 from .permissions import IsTeacher
 
@@ -43,9 +46,42 @@ def public_groups(request):
 
 
 @api_view(['GET'])
+@permission_classes([AllowAny])
+def public_settings(request):
+    """Публичные настройки (без авторизации): для отображения ссылки «Регистрация» и т.п."""
+    s = get_site_settings()
+    return Response({'registration_open': s.registration_open})
+
+
+@api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def me(request):
     return Response(CustomUserSerializer(request.user).data)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def session_check(request):
+    """Проверяет, что refresh-токен сессии ещё в OutstandingToken и не в blacklist (single-session)."""
+    refresh_str = (request.data.get('refresh') or request.data.get('r') or '').strip()
+    if not refresh_str:
+        return Response({'detail': 'refresh required'}, status=status.HTTP_401_UNAUTHORIZED)
+    ot = OutstandingToken.objects.filter(token=refresh_str).first()
+    if not ot:
+        return Response({'detail': 'session invalid'}, status=status.HTTP_401_UNAUTHORIZED)
+    if BlacklistedToken.objects.filter(token=ot).exists():
+        return Response({'detail': 'session replaced'}, status=status.HTTP_401_UNAUTHORIZED)
+    return Response({'ok': True})
+
+
+@api_view(['PATCH', 'PUT'])
+@permission_classes([IsAuthenticated])
+def profile_update(request):
+    """Обновление ФИО текущего пользователя."""
+    serializer = ProfileUpdateSerializer(data=request.data, context={'request': request}, partial=True)
+    serializer.is_valid(raise_exception=True)
+    user = serializer.save()
+    return Response(CustomUserSerializer(user).data)
 
 
 class RegisterView(generics.CreateAPIView):
@@ -53,10 +89,20 @@ class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
 
     def create(self, request, *args, **kwargs):
+        if not get_site_settings().registration_open:
+            return Response(
+                {'detail': 'Регистрация закрыта.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
+        # Single-session: invalidate any previous refresh tokens for this user
+        for ot in OutstandingToken.objects.filter(user=user):
+            BlacklistedToken.objects.get_or_create(token=ot)
         refresh = RefreshToken.for_user(user)
+        # Persist new refresh token so it can be blacklisted on next login (single-session)
+        _persist_refresh_token(refresh, user)
         return Response({
             'user': CustomUserSerializer(user).data,
             'refresh': str(refresh),
@@ -462,6 +508,13 @@ class AdminUserViewSet(viewsets.ReadOnlyModelViewSet):
         user.save(update_fields=['label'])
         return Response({'detail': 'Метка обновлена', 'label': user.label})
 
+    @action(detail=True, methods=['post'], url_path='activate')
+    def activate(self, request, pk=None):
+        user = self.get_object()
+        user.is_active = True
+        user.save(update_fields=['is_active'])
+        return Response({'detail': 'Пользователь активирован.', 'is_active': True})
+
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsTeacher])
@@ -504,6 +557,21 @@ def admin_stats(request):
         'top_assignments': top_assignments,
         'student_labels': [{'code': c, 'name': n} for c, n in STUDENT_LABELS if c],
     })
+
+
+@api_view(['GET', 'PATCH'])
+@permission_classes([IsAuthenticated, IsTeacher])
+def admin_settings(request):
+    """Настройки логики сайта (только для staff). GET — текущие, PATCH — обновление."""
+    s = get_site_settings()
+    if request.method == 'GET':
+        return Response({'registration_open': s.registration_open})
+    # PATCH
+    registration_open = request.data.get('registration_open')
+    if registration_open is not None:
+        s.registration_open = bool(registration_open)
+        s.save(update_fields=['registration_open'])
+    return Response({'registration_open': s.registration_open})
 
 
 @api_view(['GET'])

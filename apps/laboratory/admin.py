@@ -2,6 +2,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 from unfold.admin import ModelAdmin
+from unfold.contrib.import_export.forms import ExportForm, ImportForm
 from import_export import resources
 from import_export.admin import ImportExportModelAdmin as _ImportExportBase
 from django.utils.safestring import mark_safe
@@ -9,11 +10,13 @@ from django.utils.safestring import mark_safe
 
 class ImportExportModelAdmin(_ImportExportBase, ModelAdmin):
     """Combines django-unfold styling with django-import-export functionality."""
+    import_form_class = ImportForm
+    export_form_class = ExportForm
 
 from .models import (
     CustomUser, Course, CourseImage, StudentGroup,
     Assignment, Submission, Comment, AssignmentEvent, LoginLog,
-    STUDENT_LABELS,
+    SiteSettings, get_site_settings, STUDENT_LABELS,
 )
 
 
@@ -82,6 +85,13 @@ class CustomUserAdmin(ImportExportModelAdmin, UserAdmin):
             return "—"
         label_dict = dict(STUDENT_LABELS)
         return label_dict.get(obj.label, obj.label)
+
+    def get_changeform_initial_data(self, request):
+        initial = super().get_changeform_initial_data(request)
+        if request.resolver_match and 'add' in (request.resolver_match.url_name or ''):
+            if not get_site_settings().registration_open:
+                initial['is_active'] = False
+        return initial
 
 
 class CourseImageInline(admin.StackedInline):
@@ -192,3 +202,15 @@ class LoginLogAdmin(ModelAdmin):
         if len(obj.user_agent) > 60:
             return obj.user_agent[:57] + "…"
         return obj.user_agent
+
+
+@admin.register(SiteSettings)
+class SiteSettingsAdmin(ModelAdmin):
+    list_display = ("registration_open",)
+    list_display_links = ("registration_open",)
+
+    def has_add_permission(self, request):
+        return not SiteSettings.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False

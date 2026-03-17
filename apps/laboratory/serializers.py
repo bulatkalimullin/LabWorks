@@ -1,13 +1,32 @@
+from datetime import datetime
 from rest_framework import serializers
 from django.contrib.auth.password_validation import validate_password
+from django.utils import timezone
 from django.contrib.auth import authenticate
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
 import pyotp
 
 from .models import (
     CustomUser, Course, CourseImage, StudentGroup, Assignment,
     Submission, Comment, AssignmentEvent, STUDENT_LABELS, LoginLog,
 )
+
+
+def _persist_refresh_token(refresh, user):
+    """Ensure refresh token is stored in OutstandingToken for single-session blacklisting."""
+    if hasattr(refresh, 'outstand'):
+        refresh.outstand()
+        return
+    payload = getattr(refresh, 'payload', None) or {}
+    jti = payload.get('jti')
+    exp = payload.get('exp')
+    if jti and exp is not None:
+        expires_at = datetime.fromtimestamp(exp, tz=timezone.utc)
+        OutstandingToken.objects.get_or_create(
+            jti=jti,
+            defaults={'user': user, 'token': str(refresh), 'expires_at': expires_at},
+        )
 
 
 class StudentGroupSerializer(serializers.ModelSerializer):
@@ -328,7 +347,12 @@ class TokenObtainPairWith2FASerializer(TokenObtainPairSerializer):
                 ip = meta.get('REMOTE_ADDR')
             user_agent = meta.get('HTTP_USER_AGENT', '')
         LoginLog.objects.create(user=user, ip_address=ip, user_agent=user_agent)
+        # Single-session: invalidate all previous refresh tokens for this user
+        for ot in OutstandingToken.objects.filter(user=user):
+            BlacklistedToken.objects.get_or_create(token=ot)
         refresh = self.get_token(user)
+        # Persist new refresh token so it can be blacklisted on next login (single-session)
+        _persist_refresh_token(refresh, user)
         return {
             'refresh': str(refresh),
             'access': str(refresh.access_token),
@@ -354,6 +378,22 @@ class PasswordChangeSerializer(serializers.Serializer):
         user = self.context['request'].user
         user.set_password(self.validated_data['new_password'])
         user.save()
+        return user
+
+
+class ProfileUpdateSerializer(serializers.Serializer):
+    """Редактирование ФИО текущего пользователя."""
+    full_name = serializers.CharField(max_length=255, trim_whitespace=True)
+
+    def validate_full_name(self, value):
+        if not (value or '').strip():
+            raise serializers.ValidationError('ФИО не может быть пустым.')
+        return value.strip()
+
+    def save(self, **kwargs):
+        user = self.context['request'].user
+        user.full_name = self.validated_data['full_name']
+        user.save(update_fields=['full_name'])
         return user
 
 

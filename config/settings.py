@@ -60,6 +60,7 @@ INSTALLED_APPS = [
     'unfold',
     'unfold.contrib.filters',
     'unfold.contrib.forms',
+    'unfold.contrib.import_export',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -68,6 +69,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'rest_framework_simplejwt',
+    'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
     'import_export',
     'apps.laboratory',
@@ -201,7 +203,7 @@ from datetime import timedelta
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(hours=10),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
-    'ROTATE_REFRESH_TOKENS': True,
+    'ROTATE_REFRESH_TOKENS': False,
 }
 
 # CORS (SPA frontend)
@@ -232,6 +234,17 @@ UNFOLD = {
                         "title": "Дашборд",
                         "icon": "bar_chart",
                         "link": reverse_lazy("admin-dashboard"),
+                    },
+                ],
+            },
+            {
+                "title": "Настройки сайта",
+                "collapsible": False,
+                "items": [
+                    {
+                        "title": "Регистрация и логика",
+                        "icon": "settings",
+                        "link": reverse_lazy("admin:laboratory_sitesettings_changelist"),
                     },
                 ],
             },
