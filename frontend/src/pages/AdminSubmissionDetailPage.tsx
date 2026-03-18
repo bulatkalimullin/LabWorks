@@ -10,8 +10,6 @@ import {
 } from '../api/client'
 import { useToast } from '../context/ToastContext'
 
-const base = import.meta.env.VITE_API_URL || '/api/v1'
-
 function fmt(s: number): string {
   if (s <= 0) return '0с'
   const h = Math.floor(s / 3600)
@@ -305,15 +303,22 @@ export default function AdminSubmissionDetailPage() {
   }
 
   function downloadFile() {
-    if (!id) return
-    fetch(`${base}/submissions/${id}/download/`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem('access')}` },
+    if (!submission?.file_url) return
+    fetch(submission.file_url, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('access') || ''}` },
     })
-      .then((r) => { if (!r.ok) throw new Error(); return r.blob() })
-      .then((b) => {
+      .then((r) => {
+        if (!r.ok) throw new Error()
+        return r
+      })
+      .then(async (r) => {
+        const cd = r.headers.get('Content-Disposition') || ''
+        const match = cd.match(/filename="?([^"]+)"?/)
+        const filename = match?.[1] || 'submission'
+        const blob = await r.blob()
         const a = document.createElement('a')
-        a.href = URL.createObjectURL(b)
-        a.download = `submission_${id}`
+        a.href = URL.createObjectURL(blob)
+        a.download = filename
         a.click()
       })
       .catch(() => toast('Нет файла', 'error'))

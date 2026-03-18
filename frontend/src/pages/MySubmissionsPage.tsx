@@ -26,7 +26,6 @@ export default function MySubmissionsPage() {
   const { toast } = useToast()
   const [list, setList] = useState<Submission[]>([])
   const [expanded, setExpanded] = useState<number | null>(null)
-  const base = import.meta.env.VITE_API_URL || '/api/v1'
 
   useEffect(() => {
     if (isAuthenticated) api.get('/submissions/').then((r) => setList(r.data)).catch(() => setList([]))
@@ -34,9 +33,9 @@ export default function MySubmissionsPage() {
 
   if (!isAuthenticated) return <Navigate to="/login" replace />
 
-  function download(id: number) {
-    fetch(`${base}/submissions/${id}/download/`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem('access')}` },
+  function downloadFile(url: string) {
+    fetch(url, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('access') || ''}` },
     })
       .then(async (r) => {
         if (!r.ok) {
@@ -52,13 +51,17 @@ export default function MySubmissionsPage() {
           toast('Ошибка скачивания', 'error')
           return null
         }
-        return r.blob()
+        const cd = r.headers.get('Content-Disposition') || ''
+        const match = cd.match(/filename="?([^"]+)"?/)
+        const filename = match?.[1] || 'submission'
+        const blob = await r.blob()
+        return { blob, filename }
       })
-      .then((b) => {
-        if (!b) return
+      .then((res) => {
+        if (!res) return
         const a = document.createElement('a')
-        a.href = URL.createObjectURL(b)
-        a.download = `submission_${id}`
+        a.href = URL.createObjectURL(res.blob)
+        a.download = res.filename
         a.click()
       })
       .catch(() => {})
@@ -102,7 +105,12 @@ export default function MySubmissionsPage() {
                   </td>
                   <td style={{ padding: '0.75rem 1rem', whiteSpace: 'nowrap' }}>
                     {s.file_url && !assignmentClosed(s.assignment_close_time) && (
-                      <button type="button" className="btn btn-ghost" style={{ padding: '0.25rem' }} onClick={() => download(s.id)}>
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        style={{ padding: '0.25rem' }}
+                        onClick={() => downloadFile(s.file_url!)}
+                      >
                         <Download size={16} />
                       </button>
                     )}

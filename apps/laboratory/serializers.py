@@ -1,8 +1,11 @@
 from datetime import datetime
+import hashlib
+import hmac
 from rest_framework import serializers
 from django.contrib.auth.password_validation import validate_password
 from django.utils import timezone
 from django.contrib.auth import authenticate
+from django.conf import settings
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
 import pyotp
@@ -27,6 +30,22 @@ def _persist_refresh_token(refresh, user):
             jti=jti,
             defaults={'user': user, 'token': str(refresh), 'expires_at': expires_at},
         )
+
+
+def _compute_submission_download_hash(submission) -> str:
+    """
+    Download hash required by SubmissionViewSet.download.
+    Derived from (submission.uuid + submission.download_salt) via HMAC-SHA256.
+    """
+    salt = getattr(submission, 'download_salt', '') or ''
+    uuid_val = getattr(submission, 'uuid', None)
+    if not uuid_val or not salt:
+        return ''
+    return hmac.new(
+        settings.SECRET_KEY.encode('utf-8'),
+        f'{uuid_val}:{salt}'.encode('utf-8'),
+        hashlib.sha256,
+    ).hexdigest()
 
 
 class StudentGroupSerializer(serializers.ModelSerializer):
@@ -95,8 +114,8 @@ class AssignmentSerializer(serializers.ModelSerializer):
     def get_file_url(self, obj):
         if not obj.files:
             return None
-        # Always return relative URL; frontend will resolve against its own origin.
-        return obj.files.url
+        # Always return relative URL; it will be fetched with auth.
+        return f'/api/v1/assignments/{obj.id}/download-file/'
 
 
 class CommentSerializer(serializers.ModelSerializer):
@@ -132,10 +151,8 @@ class SubmissionSerializer(serializers.ModelSerializer):
 
     def get_file_url(self, obj):
         if obj.file:
-            request = self.context.get('request')
-            if request:
-                return request.build_absolute_uri(obj.file.url)
-            return obj.file.url
+            h = _compute_submission_download_hash(obj)
+            return f'/api/v1/submissions/{obj.uuid}/download/?h={h}'
         return None
 
     def get_verification_short(self, obj):
@@ -246,10 +263,8 @@ class AdminSubmissionSerializer(serializers.ModelSerializer):
 
     def get_file_url(self, obj):
         if obj.file:
-            request = self.context.get('request')
-            if request:
-                return request.build_absolute_uri(obj.file.url)
-            return obj.file.url
+            h = _compute_submission_download_hash(obj)
+            return f'/api/v1/submissions/{obj.uuid}/download/?h={h}'
         return None
 
     def get_student_label_display(self, obj):

@@ -1,5 +1,7 @@
 import hashlib
 import hmac
+import secrets
+import uuid
 import zipfile
 from io import BytesIO
 
@@ -51,6 +53,27 @@ def public_settings(request):
     """Публичные настройки (без авторизации): для отображения ссылки «Регистрация» и т.п."""
     s = get_site_settings()
     return Response({'registration_open': s.registration_open})
+
+
+def _build_file_response(file_field, as_attachment: bool = True):
+    """
+    Build a secure file response:
+    - In DEBUG: return FileResponse directly.
+    - In production: return X-Accel-Redirect to internal /protected-media/.
+    """
+    filename = (getattr(file_field, 'name', '') or '').split('/')[-1] or 'file'
+
+    if settings.DEBUG:
+        return FileResponse(file_field.open('rb'), as_attachment=as_attachment, filename=filename)
+
+    response = HttpResponse()
+    response['X-Accel-Redirect'] = f'/protected-media/{file_field.name}'
+    disposition_type = 'attachment' if as_attachment else 'inline'
+    response['Content-Disposition'] = f'{disposition_type}; filename="{filename}"'
+    # Nginx controls the actual content-type.
+    if 'Content-Type' in response:
+        del response['Content-Type']
+    return response
 
 
 @api_view(['GET'])
@@ -294,6 +317,16 @@ class AssignmentViewSet(viewsets.ModelViewSet):
         qs = Submission.objects.filter(assignment=assignment).select_related('student').prefetch_related('comments__author')
         return Response(SubmissionSerializer(qs, many=True, context={'request': request}).data)
 
+    @action(detail=True, methods=['get'], url_path='download-file')
+    def download_file(self, request, pk=None):
+        assignment = self.get_object()
+        if not assignment.files:
+            return Response({'detail': 'Файл не прикреплён'}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            return _build_file_response(assignment.files, as_attachment=True)
+        except Exception:
+            raise Http404
+
     @action(detail=True, methods=['post'], url_path='events', permission_classes=[IsAuthenticated])
     def record_event(self, request, pk=None):
         """Record assignment events. OPEN_PAGE/START_WORK are deduplicated; behavior events create a new record each time."""
@@ -329,6 +362,32 @@ class AssignmentViewSet(viewsets.ModelViewSet):
 class SubmissionViewSet(viewsets.ModelViewSet):
     serializer_class = SubmissionSerializer
     permission_classes = [IsAuthenticated]
+
+    def get_object(self):
+        """
+        Support both legacy numeric `id` and new `uuid` identifiers.
+        Unlike the default queryset filtering, we must return `403` (not `404`)
+        when the object exists but the current user is not the owner.
+        """
+        lookup_value = self.kwargs.get(self.lookup_url_kwarg or self.lookup_field)
+        if lookup_value is None:
+            raise Http404
+
+        try:
+            uuid_val = uuid.UUID(str(lookup_value))
+            submission = Submission.objects.select_related('assignment', 'student').filter(uuid=uuid_val).first()
+        except (ValueError, TypeError):
+            submission = Submission.objects.select_related('assignment', 'student').filter(pk=lookup_value).first()
+
+        if not submission:
+            raise Http404
+
+        # Enforce ownership: for non-staff only own submissions are allowed.
+        if not self.request.user.is_staff and submission.student_id != self.request.user.id:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied()
+
+        return submission
 
     def get_queryset(self):
         qs = Submission.objects.select_related('assignment', 'student').prefetch_related('comments__author')
@@ -377,6 +436,10 @@ class SubmissionViewSet(viewsets.ModelViewSet):
             'behavior_gpt_score': min(10, _int('behavior_gpt_score')),
         }
         submission = serializer.save(student=self.request.user, **behavior_fields)
+        # Ensure per-row salt exists for download hash links.
+        if not getattr(submission, 'download_salt', ''):
+            submission.download_salt = secrets.token_hex(32)  # 64 hex chars
+            submission.save(update_fields=['download_salt'])
         self._stamp_verification(submission, self.request)
 
     @staticmethod
@@ -405,21 +468,34 @@ class SubmissionViewSet(viewsets.ModelViewSet):
         submission = self.get_object()
         if not submission.file:
             return Response({'detail': 'Файл не прикреплён'}, status=status.HTTP_404_NOT_FOUND)
+        download_hash = request.query_params.get('h') or request.query_params.get('hash')
+        if not download_hash or not getattr(submission, 'download_salt', ''):
+            return Response(status=status.HTTP_403_FORBIDDEN)
+
+        expected = hmac.new(
+            settings.SECRET_KEY.encode('utf-8'),
+            f'{submission.uuid}:{submission.download_salt}'.encode('utf-8'),
+            hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(expected, str(download_hash)):
+            return Response(status=status.HTTP_403_FORBIDDEN)
+
         if not request.user.is_staff and submission.student_id != request.user.id:
             return Response(status=status.HTTP_403_FORBIDDEN)
-        # После истечения срока студент не может скачать свою работу
-        if not request.user.is_staff and timezone.now() > submission.assignment.close_time:
-            return Response(
-                {'detail': 'Срок сдачи истёк. Скачивание работы недоступно.'},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        # Student can download only within the assignment open window.
+        if not request.user.is_staff:
+            now = timezone.now()
+            assignment = submission.assignment
+            if not (assignment.open_time <= now <= assignment.close_time):
+                return Response(
+                    {'detail': 'Задание недоступно по времени. Скачивание работы недоступно.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
         try:
-            file_handle = submission.file.open('rb')
+            return _build_file_response(submission.file, as_attachment=True)
         except Exception:
             raise Http404
-        filename = submission.file.name.split('/')[-1]
-        resp = FileResponse(file_handle, as_attachment=True, filename=filename)
-        return resp
 
     @action(detail=True, methods=['get'], url_path='verify', permission_classes=[IsAuthenticated])
     def verify(self, request, pk=None):

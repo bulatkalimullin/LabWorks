@@ -79,10 +79,12 @@ function AssignmentFileBlock({
   fileUrl,
   assignmentMarkdown,
   markdownComponents,
+  onDownload,
 }: {
   fileUrl: string | null | undefined
   assignmentMarkdown: string | null
   markdownComponents: Record<string, unknown>
+  onDownload?: (url: string) => void
 }) {
   return (
     <div className="glass" style={{ padding: '1.25rem', marginBottom: '1rem', marginTop: '1rem' }}>
@@ -103,26 +105,24 @@ function AssignmentFileBlock({
             >
               <ReactMarkdown components={markdownComponents as Parameters<typeof ReactMarkdown>[0]['components']}>{assignmentMarkdown}</ReactMarkdown>
             </div>
-            <a
-              href={fileUrl}
-              target="_blank"
-              rel="noreferrer"
+            <button
+              type="button"
               className="btn btn-ghost"
               style={{ marginTop: '0.75rem', display: 'inline-flex' }}
+              onClick={() => fileUrl && onDownload?.(fileUrl)}
             >
               <Download size={16} /> Скачать файл задания (.md)
-            </a>
+            </button>
           </>
         ) : (
-          <a
-            href={fileUrl}
-            target="_blank"
-            rel="noreferrer"
+          <button
+            type="button"
             className="btn btn-ghost"
             style={{ display: 'inline-flex' }}
+            onClick={() => fileUrl && onDownload?.(fileUrl)}
           >
             <Download size={16} /> Скачать файл задания
-          </a>
+          </button>
         ))
         : (
           <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0 }}>
@@ -234,7 +234,10 @@ export default function AssignmentPage() {
       return
     }
     const controller = new AbortController()
-    fetch(assignment.file_url, { signal: controller.signal })
+    fetch(assignment.file_url, {
+      signal: controller.signal,
+      headers: { Authorization: `Bearer ${localStorage.getItem('access') || ''}` },
+    })
       .then((r) => (r.ok ? r.text() : Promise.reject()))
       .then((text) => { if (!controller.signal.aborted) setAssignmentMarkdown(text) })
       .catch((e: unknown) => { if ((e as { name?: string })?.name !== 'AbortError') setAssignmentMarkdown(null) })
@@ -497,9 +500,9 @@ export default function AssignmentPage() {
       .catch(() => toast('Ошибка скачивания', 'error'))
   }
 
-  function downloadSubmission(id: number) {
-    fetch(`${base}/submissions/${id}/download/`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem('access')}` },
+  function downloadSubmissionFile(url: string) {
+    fetch(url, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('access') || ''}` },
     })
       .then(async (r) => {
         if (!r.ok) {
@@ -514,16 +517,51 @@ export default function AssignmentPage() {
           }
           throw new Error()
         }
-        return r.blob()
+        const cd = r.headers.get('Content-Disposition') || ''
+        const match = cd.match(/filename="?([^"]+)"?/)
+        const filename = match?.[1] || 'submission'
+        return { blob: await r.blob(), filename }
       })
-      .then((b) => {
-        if (!b) return
+      .then((res) => {
+        if (!res) return
         const a = document.createElement('a')
-        a.href = URL.createObjectURL(b)
-        a.download = `submission_${id}`
+        a.href = URL.createObjectURL(res.blob)
+        a.download = res.filename
         a.click()
       })
       .catch(() => toast('Нет файла для скачивания', 'error'))
+  }
+
+  function downloadAssignmentFile(url: string) {
+    fetch(url, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('access') || ''}` },
+    })
+      .then(async (r) => {
+        if (!r.ok) {
+          if (r.status === 403) {
+            try {
+              const body = await r.json() as { detail?: string }
+              toast(body.detail || 'Скачивание недоступно', 'error')
+            } catch {
+              toast('Скачивание недоступно', 'error')
+            }
+            return null
+          }
+          throw new Error()
+        }
+        const cd = r.headers.get('Content-Disposition') || ''
+        const match = cd.match(/filename="?([^"]+)"?/)
+        const filename = match?.[1] || 'file'
+        return { blob: await r.blob(), filename }
+      })
+      .then((res) => {
+        if (!res) return
+        const a = document.createElement('a')
+        a.href = URL.createObjectURL(res.blob)
+        a.download = res.filename
+        a.click()
+      })
+      .catch(() => toast('Ошибка скачивания', 'error'))
   }
 
   if (errorCode === 403) return <AssignmentForbidden />
@@ -621,7 +659,7 @@ export default function AssignmentPage() {
                             type="button"
                             className="btn btn-ghost"
                             style={{ padding: '0.35rem 0.6rem' }}
-                            onClick={() => downloadSubmission(s.id)}
+                            onClick={() => downloadSubmissionFile(s.file_url!)}
                             title="Скачать файл"
                           >
                             <Download size={16} />
@@ -668,6 +706,7 @@ export default function AssignmentPage() {
               fileUrl={assignment.file_url}
               assignmentMarkdown={assignmentMarkdown}
               markdownComponents={markdownComponents}
+              onDownload={downloadAssignmentFile}
             />
           </>
         ) : (
@@ -702,7 +741,7 @@ export default function AssignmentPage() {
                           type="button"
                           className="btn btn-ghost"
                           style={{ padding: '0.35rem 0.6rem' }}
-                          onClick={() => downloadSubmission(s.id)}
+                          onClick={() => downloadSubmissionFile(s.file_url!)}
                         >
                           <Download size={16} />
                         </button>
@@ -717,6 +756,7 @@ export default function AssignmentPage() {
               fileUrl={assignment.file_url}
               assignmentMarkdown={assignmentMarkdown}
               markdownComponents={markdownComponents}
+              onDownload={downloadAssignmentFile}
             />
 
             {submitSuccess && (

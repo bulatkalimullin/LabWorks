@@ -116,9 +116,12 @@ class Assignment(models.Model):
 
 
 class Submission(models.Model):
+    uuid = models.UUIDField(default=uuid4, editable=False, unique=True, db_index=True)
     assignment = models.ForeignKey(Assignment, on_delete=models.CASCADE, related_name='submissions')
     student = models.ForeignKey(CustomUser, on_delete=models.CASCADE)
     file = models.FileField(upload_to='submissions/', blank=True, null=True)
+    # Secret per-row salt used to derive download hash links (uuid + hash -> file).
+    download_salt = models.CharField(max_length=64, blank=True, default='', db_index=True)
     text_response = models.TextField(blank=True, null=True)
     submitted_at = models.DateTimeField(auto_now_add=True)
     verification_payload = models.TextField(blank=True)
