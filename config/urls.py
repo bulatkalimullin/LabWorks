@@ -47,8 +47,10 @@ if settings.DEBUG:
                 raise Http404
             if not request.user.is_staff and submission.student_id != request.user.id:
                 return HttpResponseForbidden()
-            if not request.user.is_staff and not (submission.assignment.open_time <= now <= submission.assignment.close_time):
-                return HttpResponseForbidden()
+            if not request.user.is_staff:
+                from apps.laboratory.services.deadline import is_assignment_open_for_user
+                if not is_assignment_open_for_user(submission.assignment, request.user):
+                    return HttpResponseForbidden()
 
             filename = os.path.basename(submission.file.name)
             return FileResponse(submission.file.open('rb'), as_attachment=True, filename=filename)
@@ -59,7 +61,8 @@ if settings.DEBUG:
                 raise Http404
 
             if not request.user.is_staff:
-                if not (assignment.open_time <= now <= assignment.close_time):
+                from apps.laboratory.services.deadline import is_assignment_open_for_user
+                if not is_assignment_open_for_user(assignment, request.user):
                     return HttpResponseForbidden()
                 user_groups = request.user.student_groups.all()
                 if not assignment.student_groups.filter(pk__in=user_groups).exists():

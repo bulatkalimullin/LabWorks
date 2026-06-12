@@ -115,6 +115,52 @@ class Assignment(models.Model):
         return self.title
 
 
+class DeadlineOverride(models.Model):
+    """Per-assignment deadline override for a student or student group."""
+
+    assignment = models.ForeignKey(
+        Assignment, on_delete=models.CASCADE, related_name='deadline_overrides',
+    )
+    close_time = models.DateTimeField()
+    user = models.ForeignKey(
+        CustomUser, null=True, blank=True, on_delete=models.CASCADE,
+        related_name='deadline_overrides',
+    )
+    student_group = models.ForeignKey(
+        StudentGroup, null=True, blank=True, on_delete=models.CASCADE,
+        related_name='deadline_overrides',
+    )
+    updated_by = models.ForeignKey(
+        CustomUser, on_delete=models.SET_NULL, null=True, related_name='+',
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    models.Q(user__isnull=False, student_group__isnull=True)
+                    | models.Q(user__isnull=True, student_group__isnull=False)
+                ),
+                name='deadline_override_user_xor_group',
+            ),
+            models.UniqueConstraint(
+                fields=['assignment', 'user'],
+                condition=models.Q(user__isnull=False),
+                name='deadline_override_unique_assignment_user',
+            ),
+            models.UniqueConstraint(
+                fields=['assignment', 'student_group'],
+                condition=models.Q(student_group__isnull=False),
+                name='deadline_override_unique_assignment_group',
+            ),
+        ]
+
+    def __str__(self):
+        target = self.user.username if self.user_id else self.student_group.name
+        return f'{self.assignment.title} → {target}'
+
+
 class Submission(models.Model):
     uuid = models.UUIDField(default=uuid4, editable=False, unique=True, db_index=True)
     assignment = models.ForeignKey(Assignment, on_delete=models.CASCADE, related_name='submissions')

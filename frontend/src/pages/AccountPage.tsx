@@ -2,12 +2,12 @@ import { useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import { QRCodeSVG } from 'qrcode.react'
 import { api, parseApiError } from '../api/client'
-import { useAuth } from '../context/AuthContext'
+import { useAuth, type User } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { Shield } from 'lucide-react'
 
 export default function AccountPage() {
-  const { user, isAuthenticated, setUser } = useAuth()
+  const { user, isAuthenticated, isLoading, setUser, refreshUser } = useAuth()
   const { toast } = useToast()
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -19,6 +19,14 @@ export default function AccountPage() {
   const [wizardStep, setWizardStep] = useState<1 | 2 | 3>(1)
   const [fullName, setFullName] = useState('')
 
+  if (isLoading) {
+    return (
+      <div style={{ padding: '2rem' }}>
+        <div className="skeleton" style={{ height: 32, width: 200, marginBottom: 16 }} />
+        <div className="skeleton" style={{ height: 120 }} />
+      </div>
+    )
+  }
   if (!isAuthenticated) return <Navigate to="/login" replace />
 
   const displayFullName = fullName || user?.full_name || ''
@@ -31,8 +39,8 @@ export default function AccountPage() {
       return
     }
     try {
-      const { data } = await api.patch('/auth/profile/', { full_name: name })
-      setUser({ ...user!, full_name: data.full_name })
+      const { data } = await api.patch<User>('/auth/profile/', { full_name: name })
+      setUser(data)
       setFullName('')
       toast('ФИО сохранено', 'success')
     } catch (err) {
@@ -69,7 +77,7 @@ export default function AccountPage() {
     try {
       await api.post('/auth/2fa/enable/', { code: enableCode })
       toast('2FA включена', 'success')
-      setUser({ ...user!, totp_enabled: true })
+      await refreshUser()
       setEnableCode('')
       setSetupSecret('')
       setWizardStep(1)
@@ -83,7 +91,7 @@ export default function AccountPage() {
     try {
       await api.post('/auth/2fa/disable/', { password: disablePassword })
       toast('2FA отключена', 'success')
-      setUser({ ...user!, totp_enabled: false })
+      await refreshUser()
       setDisablePassword('')
       setWizardStep(1)
     } catch (err) {

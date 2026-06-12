@@ -1,4 +1,7 @@
 asgiref==3.10.0
+channels>=4.0.0
+channels-redis>=4.2.0
+daphne>=4.0.0
 Django==5.2.7
 sqlparse==0.5.3
 tzdata==2025.2

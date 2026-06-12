@@ -2,19 +2,22 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, type Course, type CourseImage, type Assignment } from '../api/client'
 import { useAuth } from '../context/AuthContext'
+import { getEffectiveCloseTime } from '../context/AssignmentRealtimeContext'
+import { useAssignmentsLiveVersion } from '../hooks/useAssignmentLive'
+import { assignmentRealtimeStore } from '../lib/assignmentRealtimeStore'
 import { usePublicSettings } from '../context/PublicSettingsContext'
-import { BookOpen, Shield, FileText } from 'lucide-react'
+import { BookOpen, ChevronRight, FileText, Shield } from 'lucide-react'
 
 function assignmentIsAvailable(a: Assignment): boolean {
   const now = Date.now()
   const open = new Date(a.open_time).getTime()
-  const close = new Date(a.close_time).getTime()
+  const close = new Date(getEffectiveCloseTime(a)).getTime()
   return now >= open && now <= close
 }
 
 const ROTATE_BG_INTERVAL_MS = 5000
 
-function CourseCardBackground({ images, courseName }: { images: CourseImage[]; courseName: string }) {
+function CourseCardBackground({ images }: { images: CourseImage[] }) {
   const n = images.length
   const [state, setState] = useState(() => ({
     showFirst: true,
@@ -40,7 +43,8 @@ function CourseCardBackground({ images, courseName }: { images: CourseImage[]; c
     <div className={`course-card-image-wrap${stacked ? ' course-card-image-wrap--stacked' : ''}`}>
       <img
         src={images[state.slot1Index].image}
-        alt={courseName}
+        alt=""
+        aria-hidden
         className="course-card-image course-card-image--crossfade"
         style={{ opacity: state.showFirst ? 1 : 0 }}
       />
@@ -53,15 +57,29 @@ function CourseCardBackground({ images, courseName }: { images: CourseImage[]; c
           style={{ opacity: state.showFirst ? 0 : 1 }}
         />
       )}
-      <div className="course-card-image-overlay" />
     </div>
   )
+}
+
+function CourseCardMedia({ course }: { course: Course }) {
+  if (course.images && course.images.length > 0) {
+    return <CourseCardBackground images={course.images} />
+  }
+  if (course.cover_image) {
+    return (
+      <div className="course-card-image-wrap">
+        <img src={course.cover_image} alt="" aria-hidden className="course-card-image" />
+      </div>
+    )
+  }
+  return <div className="course-card-image-wrap course-card-image-wrap--fallback" aria-hidden />
 }
 
 export default function CoursesPage() {
   const [courses, setCourses] = useState<Course[]>([])
   const [assignments, setAssignments] = useState<Assignment[]>([])
-  const { isAuthenticated, user } = useAuth()
+  const { isAuthenticated, user, isLoading } = useAuth()
+  const liveVersion = useAssignmentsLiveVersion()
   const { registration_open } = usePublicSettings()
   const navigate = useNavigate()
 
@@ -73,12 +91,21 @@ export default function CoursesPage() {
 
   useEffect(() => {
     if (!isAuthenticated || !(user?.is_staff || user?.totp_enabled)) return
-    api.get('/assignments/').then((r) => setAssignments(r.data || [])).catch(() => setAssignments([]))
+    api.get('/assignments/').then((r) => {
+      const list = r.data || []
+      setAssignments(list)
+      list.forEach((a: Assignment) => assignmentRealtimeStore.mergeAssignment(a))
+    }).catch(() => setAssignments([]))
   }, [isAuthenticated, user])
+
+  const liveAssignments = useMemo(
+    () => assignments.map((a) => assignmentRealtimeStore.getAssignment(a.id) ?? a),
+    [assignments, liveVersion],
+  )
 
   const availableCountByCourse = useMemo(() => {
     const map: Record<number, number> = {}
-    for (const a of assignments) {
+    for (const a of liveAssignments) {
       const cid = a.course_id ?? a.course
       if (cid == null) continue
       if (user?.is_staff) {
@@ -88,7 +115,16 @@ export default function CoursesPage() {
       }
     }
     return map
-  }, [assignments, user?.is_staff])
+  }, [liveAssignments, user?.is_staff])
+
+  if (isLoading) {
+    return (
+      <div className="container-narrow page-enter" style={{ paddingTop: '2rem' }}>
+        <div className="skeleton" style={{ height: 40, width: 280, marginBottom: 16 }} />
+        <div className="skeleton" style={{ height: 160 }} />
+      </div>
+    )
+  }
 
   if (!isAuthenticated) {
     return (
@@ -124,29 +160,29 @@ export default function CoursesPage() {
       <h1 style={{ marginBottom: '1.5rem' }}>Курсы</h1>
       <div className="courses-grid">
         {courses.map((c) => (
-          <div
+          <Link
             key={c.id}
+            to={`/course/${c.id}`}
             className="glass card-hover course-card"
           >
+            <div className="course-card-bg">
+              <CourseCardMedia course={c} />
+            </div>
+            <div className="course-card-shade" aria-hidden />
             {availableCountByCourse[c.id] != null && availableCountByCourse[c.id] > 0 && (
               <span className="course-card-badge-corner" title="Доступны задания для сдачи">
                 <FileText size={14} />
                 Есть задание
               </span>
             )}
-            {c.images && c.images.length > 0 ? (
-              <CourseCardBackground images={c.images} courseName={c.name} />
-            ) : c.cover_image ? (
-              <div className="course-card-image-wrap">
-                <img src={c.cover_image} alt={c.name} className="course-card-image" />
-                <div className="course-card-image-overlay" />
-              </div>
-            ) : null}
-            <div className="course-card-body">
-              <h3 style={{ margin: '0 0 0.75rem' }}>{c.name}</h3>
-              <Link to={`/course/${c.id}`} className="btn btn-primary">Открыть</Link>
+            <div className="course-card-inner">
+              <h3 className="course-card-title">{c.name}</h3>
+              <span className="course-card-action">
+                Открыть курс
+                <ChevronRight size={18} aria-hidden />
+              </span>
             </div>
-          </div>
+          </Link>
         ))}
       </div>
       {courses.length === 0 && <p style={{ color: 'var(--text-muted)' }}>Курсов пока нет.</p>}

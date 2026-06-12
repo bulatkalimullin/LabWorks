@@ -11,10 +11,12 @@ export default function FileDropzone({
   onFile,
   onError,
   allowedExtensions,
+  disabled = false,
 }: {
   onFile: (f: File | null) => void
   onError?: (message: string) => void
   allowedExtensions?: string[]
+  disabled?: boolean
 }) {
   const [drag, setDrag] = useState(false)
   const [selected, setSelected] = useState<File | null>(null)
@@ -42,6 +44,7 @@ export default function FileDropzone({
 
   const handleFile = useCallback(
     (f: File | null) => {
+      if (disabled) return
       if (!f) {
         setSelected(null)
         onFile(null)
@@ -51,17 +54,18 @@ export default function FileDropzone({
       setSelected(f)
       onFile(f)
     },
-    [validate, onFile],
+    [disabled, validate, onFile],
   )
 
   const onDrop = useCallback(
     (e: React.DragEvent) => {
+      if (disabled) return
       e.preventDefault()
       setDrag(false)
       const f = e.dataTransfer.files[0]
       if (f) handleFile(f)
     },
-    [handleFile],
+    [disabled, handleFile],
   )
 
   function clear(e: React.MouseEvent) {
@@ -74,12 +78,13 @@ export default function FileDropzone({
   return (
     <div
       className="dropzone-root"
-      data-drag={drag}
+      data-drag={drag && !disabled}
       data-filled={!!selected}
-      onDragOver={(e) => { e.preventDefault(); setDrag(true) }}
+      data-disabled={disabled}
+      onDragOver={(e) => { if (disabled) return; e.preventDefault(); setDrag(true) }}
       onDragLeave={() => setDrag(false)}
       onDrop={onDrop}
-      onClick={() => !selected && inputRef.current?.click()}
+      onClick={() => !disabled && !selected && inputRef.current?.click()}
     >
       {selected ? (
         <div className="dropzone-file-info">

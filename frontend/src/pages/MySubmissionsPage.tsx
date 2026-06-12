@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Navigate, Link } from 'react-router-dom'
 import { api } from '../api/client'
+import { triggerNativeDownload } from '../lib/download'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { Download, KeyRound } from 'lucide-react'
@@ -22,7 +23,7 @@ function assignmentClosed(closeTime: string | undefined): boolean {
 }
 
 export default function MySubmissionsPage() {
-  const { isAuthenticated } = useAuth()
+  const { isAuthenticated, isLoading } = useAuth()
   const { toast } = useToast()
   const [list, setList] = useState<Submission[]>([])
   const [expanded, setExpanded] = useState<number | null>(null)
@@ -31,40 +32,23 @@ export default function MySubmissionsPage() {
     if (isAuthenticated) api.get('/submissions/').then((r) => setList(r.data)).catch(() => setList([]))
   }, [isAuthenticated])
 
+  if (isLoading) {
+    return (
+      <div style={{ padding: '2rem' }}>
+        <div className="skeleton" style={{ height: 32, width: 200, marginBottom: 16 }} />
+        <div className="skeleton" style={{ height: 120 }} />
+      </div>
+    )
+  }
   if (!isAuthenticated) return <Navigate to="/login" replace />
 
   function downloadFile(url: string) {
-    fetch(url, {
-      headers: { Authorization: `Bearer ${localStorage.getItem('access') || ''}` },
-    })
-      .then(async (r) => {
-        if (!r.ok) {
-          if (r.status === 403) {
-            try {
-              const body = await r.json() as { detail?: string }
-              toast(body.detail || 'Скачивание недоступно', 'error')
-            } catch {
-              toast('Скачивание недоступно', 'error')
-            }
-            return null
-          }
-          toast('Ошибка скачивания', 'error')
-          return null
-        }
-        const cd = r.headers.get('Content-Disposition') || ''
-        const match = cd.match(/filename="?([^"]+)"?/)
-        const filename = match?.[1] || 'submission'
-        const blob = await r.blob()
-        return { blob, filename }
-      })
-      .then((res) => {
-        if (!res) return
-        const a = document.createElement('a')
-        a.href = URL.createObjectURL(res.blob)
-        a.download = res.filename
-        a.click()
-      })
-      .catch(() => {})
+    const token = localStorage.getItem('access') || ''
+    if (!token) {
+      toast('Войдите в аккаунт', 'error')
+      return
+    }
+    triggerNativeDownload(url, token)
   }
 
   return (

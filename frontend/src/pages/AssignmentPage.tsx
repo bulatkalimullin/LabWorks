@@ -1,17 +1,22 @@
 import { useMemo, useEffect, useRef, useState, useCallback } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { api, type Assignment, parseApiError } from '../api/client'
+import { triggerNativeDownload } from '../lib/download'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
+import AssignmentLiveSidebar from '../components/AssignmentLiveSidebar'
+import AssignmentDeadlinePanel from '../components/AssignmentDeadlinePanel'
+import { useAssignmentLive } from '../hooks/useAssignmentLive'
+import { assignmentRealtimeStore } from '../lib/assignmentRealtimeStore'
 import FileDropzone from '../components/FileDropzone'
 import CommentSection from '../components/CommentSection'
 import Modal from '../components/Modal'
+import MermaidBlock from '../components/MermaidBlock'
 import {
   ArrowLeft,
-  Calendar,
   CheckCircle2,
-  Clock,
   Copy,
   Download,
   FileArchive,
@@ -33,56 +38,32 @@ type Submission = {
   verification_signature?: string | null
 }
 
-// Constants outside component — no recalculation on every render
-const TWENTY_MINUTES_MS = 20 * 60 * 1000
-const ONE_HOUR_MS = 60 * 60 * 1000
-
-function getFileExtension(url: string): string {
-  const clean = url.split('?')[0]
-  const parts = clean.split('.')
+function getFileExtension(path: string): string {
+  const basename = path.split('?')[0].split('/').pop() || ''
+  const parts = basename.split('.')
   if (parts.length < 2) return ''
   return parts[parts.length - 1].toLowerCase()
 }
 
-function computeRemaining(closeTime: string): number {
-  return Math.max(0, new Date(closeTime).getTime() - Date.now())
-}
-
-function formatHms(ms: number): string {
-  const totalSeconds = Math.max(0, Math.floor(ms / 1000))
-  const hours = Math.floor(totalSeconds / 3600)
-  const minutes = Math.floor((totalSeconds % 3600) / 60)
-  const seconds = totalSeconds % 60
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`
-}
-
-function getStatus(assignment: Assignment): 'open' | 'closing-soon' | 'closed' | 'pending' {
-  const now = Date.now()
-  const open = new Date(assignment.open_time).getTime()
-  const close = new Date(assignment.close_time).getTime()
-  if (now < open) return 'pending'
-  if (now > close) return 'closed'
-  if (close - now < 60 * 60 * 1000) return 'closing-soon'
-  return 'open'
-}
-
-const STATUS_LABELS = {
-  open: 'Открыто',
-  'closing-soon': 'Скоро закрывается',
-  closed: 'Закрыто',
-  pending: 'Ещё не открыто',
+function isMarkdownFile(filesPath: string | null | undefined): boolean {
+  return getFileExtension(filesPath ?? '') === 'md'
 }
 
 // Extracted shared component for assignment file block
 function AssignmentFileBlock({
   fileUrl,
+  isMarkdown,
   assignmentMarkdown,
+  markdownLoading,
+  markdownError,
   markdownComponents,
   onDownload,
 }: {
   fileUrl: string | null | undefined
+  isMarkdown: boolean
   assignmentMarkdown: string | null
+  markdownLoading: boolean
+  markdownError: boolean
   markdownComponents: Record<string, unknown>
   onDownload?: (url: string) => void
 }) {
@@ -90,21 +71,38 @@ function AssignmentFileBlock({
     <div className="glass" style={{ padding: '1.25rem', marginBottom: '1rem', marginTop: '1rem' }}>
       <h3 style={{ margin: '0 0 0.75rem', fontSize: '1rem' }}>Файл задания</h3>
       {fileUrl
-        ? (getFileExtension(fileUrl) === 'md' && assignmentMarkdown ? (
+        ? (isMarkdown ? (
           <>
-            <div
-              className="assignment-markdown"
-              style={{
-                borderRadius: 10,
-                border: '1px solid var(--border)',
-                padding: '0.85rem 1rem',
-                background: 'rgba(15,23,42,0.6)',
-                fontSize: '0.9rem',
-                lineHeight: 1.6,
-              }}
-            >
-              <ReactMarkdown components={markdownComponents as Parameters<typeof ReactMarkdown>[0]['components']}>{assignmentMarkdown}</ReactMarkdown>
-            </div>
+            {markdownLoading && (
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: '0 0 0.75rem' }}>
+                Загрузка файла задания…
+              </p>
+            )}
+            {markdownError && (
+              <p style={{ fontSize: '0.85rem', color: 'var(--danger)', margin: '0 0 0.75rem' }}>
+                Не удалось загрузить файл задания для просмотра.
+              </p>
+            )}
+            {assignmentMarkdown && (
+              <div
+                className="assignment-markdown"
+                style={{
+                  borderRadius: 10,
+                  border: '1px solid var(--border)',
+                  padding: '0.85rem 1rem',
+                  background: 'rgba(15,23,42,0.6)',
+                  fontSize: '0.9rem',
+                  lineHeight: 1.6,
+                }}
+              >
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={markdownComponents as Parameters<typeof ReactMarkdown>[0]['components']}
+                >
+                  {assignmentMarkdown}
+                </ReactMarkdown>
+              </div>
+            )}
             <button
               type="button"
               className="btn btn-ghost"
@@ -140,15 +138,17 @@ export default function AssignmentPage() {
   const [textResponse, setTextResponse] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [commentFor, setCommentFor] = useState<number | null>(null)
-  const [remaining, setRemaining] = useState(0)
+  const [submissionClosed, setSubmissionClosed] = useState(false)
   const [submitSuccess, setSubmitSuccess] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [expandedVerify, setExpandedVerify] = useState<number | null>(null)
   const [assignmentMarkdown, setAssignmentMarkdown] = useState<string | null>(null)
+  const [markdownLoading, setMarkdownLoading] = useState(false)
+  const [markdownError, setMarkdownError] = useState(false)
   const [errorCode, setErrorCode] = useState<403 | 404 | null>(null)
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const startWorkFired = useRef(false)
   const leftColRef = useRef<HTMLDivElement>(null)
+  const rightColRef = useRef<HTMLDivElement>(null)
   // Behavior analytics counters (anti-GPT)
   const clipboardChanges = useRef(0)
   const pasteCount = useRef(0)
@@ -159,8 +159,7 @@ export default function AssignmentPage() {
   const keylogBuffer = useRef<{ key: string; t: number }[]>([])
   const pageLoadTime = useRef(Date.now())
   const keylogDebounce = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [rightColMinHeight, setRightColMinHeight] = useState<number>(0)
-  const { user } = useAuth()
+  const { user, isLoading } = useAuth()
   const { toast } = useToast()
   const navigate = useNavigate()
   const base = import.meta.env.VITE_API_URL || '/api/v1'
@@ -175,12 +174,15 @@ export default function AssignmentPage() {
         children,
         ...props
       }: { className?: string; children?: React.ReactNode }) {
-        const codeString = String(children ?? '')
+        const codeString = String(children ?? '').replace(/\n$/, '')
+        if ((className || '').includes('language-mermaid')) {
+          return <MermaidBlock chart={codeString} />
+        }
         const isBlock = (className || '').includes('language-') || codeString.includes('\n')
         if (isBlock) {
           return (
             <pre className="assignment-code-block">
-              <code {...props}>{codeString}</code>
+              <code className={className} {...props}>{codeString}</code>
             </pre>
           )
         }
@@ -195,11 +197,14 @@ export default function AssignmentPage() {
   )
 
   useEffect(() => {
-    if (!assignmentId) return
+    if (!assignmentId || isLoading) return
     setErrorCode(null)
     api
       .get(`/assignments/${assignmentId}/`)
-      .then((r) => setAssignment(r.data))
+      .then((r) => {
+        setAssignment(r.data)
+        assignmentRealtimeStore.mergeAssignment(r.data)
+      })
       .catch((err: unknown) => {
         const status = (err as { response?: { status?: number } })?.response?.status
         if (status === 403 || status === 404) {
@@ -210,55 +215,64 @@ export default function AssignmentPage() {
     if (!user?.is_staff) {
       api.post(`/assignments/${assignmentId}/events/`, { event_type: 'OPEN_PAGE' }).catch(() => {})
     }
-  }, [assignmentId, user?.is_staff])
+  }, [assignmentId, user?.is_staff, isLoading])
 
-  // Timer — only re-run when close_time changes
-  useEffect(() => {
-    if (!assignment) return
-    setRemaining(computeRemaining(assignment.close_time))
-    intervalRef.current = setInterval(() => {
-      setRemaining(computeRemaining(assignment.close_time))
-    }, 1000)
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
-  }, [assignment?.close_time])
+  const liveAssignment = useAssignmentLive(assignmentId, assignment ?? undefined)
+  const handleClosedChange = useCallback((closed: boolean) => setSubmissionClosed(closed), [])
 
   // Markdown fetch with AbortController
   useEffect(() => {
-    if (!assignment?.file_url) {
+    if (!liveAssignment?.file_url || !isMarkdownFile(liveAssignment.files)) {
       setAssignmentMarkdown(null)
-      return
-    }
-    const ext = getFileExtension(assignment.file_url)
-    if (ext !== 'md') {
-      setAssignmentMarkdown(null)
+      setMarkdownLoading(false)
+      setMarkdownError(false)
       return
     }
     const controller = new AbortController()
-    fetch(assignment.file_url, {
+    setMarkdownLoading(true)
+    setMarkdownError(false)
+    setAssignmentMarkdown(null)
+    fetch(liveAssignment.file_url, {
       signal: controller.signal,
       headers: { Authorization: `Bearer ${localStorage.getItem('access') || ''}` },
     })
       .then((r) => (r.ok ? r.text() : Promise.reject()))
-      .then((text) => { if (!controller.signal.aborted) setAssignmentMarkdown(text) })
-      .catch((e: unknown) => { if ((e as { name?: string })?.name !== 'AbortError') setAssignmentMarkdown(null) })
+      .then((text) => {
+        if (!controller.signal.aborted) {
+          setAssignmentMarkdown(text)
+          setMarkdownLoading(false)
+        }
+      })
+      .catch((e: unknown) => {
+        if ((e as { name?: string })?.name !== 'AbortError' && !controller.signal.aborted) {
+          setAssignmentMarkdown(null)
+          setMarkdownLoading(false)
+          setMarkdownError(true)
+        }
+      })
     return () => controller.abort()
-  }, [assignment?.file_url])
+  }, [liveAssignment?.file_url, liveAssignment?.files])
 
-  // ResizeObserver — mount once, observes DOM changes on its own
+  // Keep right column tall enough for sticky timer while reading long assignment
   useEffect(() => {
-    const el = leftColRef.current
-    if (!el) return
-    const ro = new ResizeObserver(() => {
-      setRightColMinHeight(el.offsetHeight)
-    })
-    ro.observe(el)
-    setRightColMinHeight(el.offsetHeight)
-    return () => ro.disconnect()
-  }, [])
+    const left = leftColRef.current
+    const right = rightColRef.current
+    if (!left || !right) return
+
+    const syncHeight = () => {
+      right.style.minHeight = `${left.offsetHeight}px`
+    }
+
+    const observer = new ResizeObserver(syncHeight)
+    observer.observe(left)
+    syncHeight()
+
+    return () => observer.disconnect()
+  }, [liveAssignment, assignmentMarkdown, markdownLoading, submissions.length, user?.is_staff])
 
   // Clipboard polling (anti-GPT monitoring) — только для студентов
   useEffect(() => {
-    if (!assignmentId || user?.is_staff) return
+    if (!assignmentId || isLoading || user?.is_staff) return
     let lastHash = ''
     let isPolling = false
     const dbg = localStorage.getItem('labworks_debug') === 'true'
@@ -342,11 +356,11 @@ export default function AssignmentPage() {
       document.removeEventListener('copy', onCopy)
       document.removeEventListener('click', onDocumentClick)
     }
-  }, [assignmentId, user?.is_staff])
+  }, [assignmentId, user?.is_staff, isLoading])
 
   // Keylog flush при размонтировании (финальный батч)
   useEffect(() => {
-    if (!assignmentId || user?.is_staff) return
+    if (!assignmentId || isLoading || user?.is_staff) return
     return () => {
       if (keylogDebounce.current) clearTimeout(keylogDebounce.current)
       const batch = keylogBuffer.current.splice(0)
@@ -356,10 +370,10 @@ export default function AssignmentPage() {
         metadata: { keys: batch },
       }).catch(() => {})
     }
-  }, [assignmentId, user?.is_staff])
+  }, [assignmentId, user?.is_staff, isLoading])
 
   const refreshSubmissions = useCallback(async () => {
-    if (!assignmentId || !user) return
+    if (!assignmentId || !user || isLoading) return
     try {
       if (user.is_staff) {
         const r = await api.get(`/assignments/${assignmentId}/submissions/`)
@@ -371,7 +385,7 @@ export default function AssignmentPage() {
       }
     } catch {
     }
-  }, [assignmentId, user?.id, user?.is_staff])
+  }, [assignmentId, user?.id, user?.is_staff, isLoading])
 
   useEffect(() => { refreshSubmissions() }, [refreshSubmissions])
 
@@ -434,10 +448,10 @@ export default function AssignmentPage() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
-    if (!assignmentId || !assignment) return
+    if (!assignmentId || !liveAssignment) return
     if (submitting) return
 
-    if (remaining === 0) {
+    if (submissionClosed) {
       toast('Задание закрыто — срок сдачи истёк', 'error')
       return
     }
@@ -471,7 +485,12 @@ export default function AssignmentPage() {
     form.append('behavior_gpt_score', String(Math.min(10, gptScore)))
     setSubmitting(true)
     try {
-      await api.post('/submissions/', form, { headers: { 'Content-Type': 'multipart/form-data' } })
+      await api.post('/submissions/', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 600000,
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity,
+      })
       setSubmitSuccess(true)
       setTimeout(() => setSubmitSuccess(false), 2000)
       toast('Работа успешно отправлена!', 'success')
@@ -494,78 +513,41 @@ export default function AssignmentPage() {
       .then((b) => {
         const a = document.createElement('a')
         a.href = URL.createObjectURL(b)
-        a.download = `${assignment?.title || 'submissions'}.zip`
+        a.download = `${liveAssignment?.title || 'submissions'}.zip`
         a.click()
       })
       .catch(() => toast('Ошибка скачивания', 'error'))
   }
 
   function downloadSubmissionFile(url: string) {
-    fetch(url, {
-      headers: { Authorization: `Bearer ${localStorage.getItem('access') || ''}` },
-    })
-      .then(async (r) => {
-        if (!r.ok) {
-          if (r.status === 403) {
-            try {
-              const body = await r.json() as { detail?: string }
-              toast(body.detail || 'Скачивание недоступно', 'error')
-            } catch {
-              toast('Скачивание недоступно', 'error')
-            }
-            return null
-          }
-          throw new Error()
-        }
-        const cd = r.headers.get('Content-Disposition') || ''
-        const match = cd.match(/filename="?([^"]+)"?/)
-        const filename = match?.[1] || 'submission'
-        return { blob: await r.blob(), filename }
-      })
-      .then((res) => {
-        if (!res) return
-        const a = document.createElement('a')
-        a.href = URL.createObjectURL(res.blob)
-        a.download = res.filename
-        a.click()
-      })
-      .catch(() => toast('Нет файла для скачивания', 'error'))
+    const token = localStorage.getItem('access') || ''
+    if (!token) {
+      toast('Войдите в аккаунт', 'error')
+      return
+    }
+    triggerNativeDownload(url, token)
   }
 
   function downloadAssignmentFile(url: string) {
-    fetch(url, {
-      headers: { Authorization: `Bearer ${localStorage.getItem('access') || ''}` },
-    })
-      .then(async (r) => {
-        if (!r.ok) {
-          if (r.status === 403) {
-            try {
-              const body = await r.json() as { detail?: string }
-              toast(body.detail || 'Скачивание недоступно', 'error')
-            } catch {
-              toast('Скачивание недоступно', 'error')
-            }
-            return null
-          }
-          throw new Error()
-        }
-        const cd = r.headers.get('Content-Disposition') || ''
-        const match = cd.match(/filename="?([^"]+)"?/)
-        const filename = match?.[1] || 'file'
-        return { blob: await r.blob(), filename }
-      })
-      .then((res) => {
-        if (!res) return
-        const a = document.createElement('a')
-        a.href = URL.createObjectURL(res.blob)
-        a.download = res.filename
-        a.click()
-      })
-      .catch(() => toast('Ошибка скачивания', 'error'))
+    const token = localStorage.getItem('access') || ''
+    if (!token) {
+      toast('Войдите в аккаунт', 'error')
+      return
+    }
+    triggerNativeDownload(url, token)
   }
 
   if (errorCode === 403) return <AssignmentForbidden />
   if (errorCode === 404) return <AssignmentNotFound />
+
+  if (isLoading) {
+    return (
+      <div style={{ padding: '2rem' }}>
+        <div className="skeleton" style={{ height: 32, width: 200, marginBottom: 16 }} />
+        <div className="skeleton" style={{ height: 120 }} />
+      </div>
+    )
+  }
 
   if (!user?.is_staff && !user?.totp_enabled) {
     return (
@@ -582,7 +564,7 @@ export default function AssignmentPage() {
     )
   }
 
-  if (!assignment) {
+  if (!assignment || !liveAssignment) {
     return (
       <div style={{ padding: '2rem' }}>
         <div className="skeleton" style={{ height: 32, width: 200, marginBottom: 16 }} />
@@ -591,28 +573,15 @@ export default function AssignmentPage() {
     )
   }
 
-  const status = getStatus(assignment)
-  const allowedExtensions = assignment.allowed_extensions
-    ? assignment.allowed_extensions.split(',').map((e) => e.trim()).filter(Boolean)
+  const allowedExtensions = liveAssignment.allowed_extensions
+    ? liveAssignment.allowed_extensions.split(',').map((e) => e.trim()).filter(Boolean)
     : []
-  let timerLevel: string
-  if (status === 'pending') {
-    timerLevel = 'pending'
-  } else if (status === 'closed') {
-    timerLevel = 'closed'
-  } else if (remaining >= ONE_HOUR_MS) {
-    timerLevel = 'long'
-  } else if (remaining >= TWENTY_MINUTES_MS) {
-    timerLevel = 'medium'
-  } else {
-    timerLevel = 'short'
-  }
 
   return (
     <div className="assignment-layout page-enter">
       <div ref={leftColRef} className="assignment-left">
         <Link
-          to={`/course/${assignment.course}`}
+          to={`/course/${liveAssignment.course}`}
           style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--text-muted)', marginBottom: '1rem' }}
         >
           <ArrowLeft size={16} /> Назад к заданиям
@@ -625,6 +594,8 @@ export default function AssignmentPage() {
                 <FileArchive size={18} /> Скачать все работы (ZIP)
               </button>
             </div>
+
+            <AssignmentDeadlinePanel assignment={liveAssignment} />
 
             {submissions.length > 0 && (
               <div className="glass" style={{ padding: '1rem' }}>
@@ -704,7 +675,10 @@ export default function AssignmentPage() {
 
             <AssignmentFileBlock
               fileUrl={assignment.file_url}
+              isMarkdown={isMarkdownFile(assignment.files)}
               assignmentMarkdown={assignmentMarkdown}
+              markdownLoading={markdownLoading}
+              markdownError={markdownError}
               markdownComponents={markdownComponents}
               onDownload={downloadAssignmentFile}
             />
@@ -736,7 +710,7 @@ export default function AssignmentPage() {
                           <KeyRound size={12} /> {s.verification_short}…
                         </span>
                       )}
-                      {s.file_url && status !== 'closed' && (
+                      {s.file_url && !submissionClosed && (
                         <button
                           type="button"
                           className="btn btn-ghost"
@@ -753,8 +727,11 @@ export default function AssignmentPage() {
             )}
 
             <AssignmentFileBlock
-              fileUrl={assignment.file_url}
+              fileUrl={liveAssignment.file_url}
+              isMarkdown={isMarkdownFile(liveAssignment.files)}
               assignmentMarkdown={assignmentMarkdown}
+              markdownLoading={markdownLoading}
+              markdownError={markdownError}
               markdownComponents={markdownComponents}
               onDownload={downloadAssignmentFile}
             />
@@ -765,13 +742,14 @@ export default function AssignmentPage() {
               </div>
             )}
 
-            <div className="glass" style={{ padding: '1.25rem' }}>
+            <div className={`glass ${submissionClosed ? 'submission-form--closed' : ''}`} style={{ padding: '1.25rem' }}>
               <h3 style={{ margin: '0 0 1rem', fontSize: '1rem' }}>Отправить работу</h3>
               <form onSubmit={submit}>
                 <FileDropzone
                   onFile={handleFileSelect}
                   onError={handleFileError}
                   allowedExtensions={allowedExtensions.length ? allowedExtensions : undefined}
+                  disabled={submissionClosed}
                 />
                 <label style={{ marginTop: '1rem' }}>Текстовый ответ</label>
                 <textarea
@@ -781,18 +759,19 @@ export default function AssignmentPage() {
                   onChange={handleTextChange}
                   onKeyDown={handleKeyDown}
                   onPaste={handlePaste}
+                  disabled={submissionClosed}
                   style={{ resize: 'vertical' }}
                   placeholder="Необязательно — опишите ваш подход..."
                 />
                 <button
                   type="submit"
                   className="btn btn-primary"
-                  disabled={status === 'closed' || status === 'pending' || remaining <= 0 || submitting}
+                  disabled={submissionClosed || submitting}
                   style={{ marginTop: '1rem', width: '100%' }}
                 >
                   {submitting ? 'Отправка…' : 'Отправить'}
                 </button>
-                {status === 'closed' && (
+                {submissionClosed && (
                   <p style={{ marginTop: '0.5rem', color: 'var(--danger)', fontSize: '0.85rem', textAlign: 'center' }}>
                     Срок сдачи истёк
                   </p>
@@ -803,60 +782,12 @@ export default function AssignmentPage() {
         )}
       </div>
 
-      <div className="assignment-right" style={rightColMinHeight ? { minHeight: rightColMinHeight } : undefined}>
-        <div className="glass assignment-info-card assignment-info-card--scrolls">
-          <h1 style={{ margin: '0 0 0.5rem', fontSize: '1.35rem' }}>{assignment.title}</h1>
-          <div style={{ marginBottom: '1rem' }}>
-            <span className={`status-badge status-${status} timer-${timerLevel}`}>{STATUS_LABELS[status]}</span>
-          </div>
-          <div className={`timer-block ${status === 'closing-soon' ? 'timer-block--urgent' : ''}`}>
-            <Clock size={18} style={{ flexShrink: 0 }} />
-            <div className="timer-block-inner">
-              {status === 'closed' ? (
-                <div className="timer-closed-text">Закрыто</div>
-              ) : (
-                <div className={`timer-label timer-${timerLevel}`}>
-                  {formatHms(remaining)} до закрытия
-                </div>
-              )}
-            </div>
-          </div>
-          <p className="timer-warning-text">
-            После истечения таймера задание автоматически закрывается, и отправка решения становится недоступной.
-          </p>
-          <div className="info-row">
-            <Calendar size={16} style={{ flexShrink: 0, color: 'var(--text-muted)' }} />
-            <div>
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 2 }}>Открытие</div>
-              <div style={{ fontSize: '0.9rem' }}>{new Date(assignment.open_time).toLocaleString('ru')}</div>
-            </div>
-          </div>
-          <div className="info-row">
-            <Calendar size={16} style={{ flexShrink: 0, color: 'var(--text-muted)' }} />
-            <div>
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: 2 }}>Закрытие</div>
-              <div style={{ fontSize: '0.9rem' }}>{new Date(assignment.close_time).toLocaleString('ru')}</div>
-            </div>
-          </div>
-          {allowedExtensions.length > 0 && (
-            <div style={{ marginTop: '1rem' }}>
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Допустимые форматы</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {allowedExtensions.map((ext) => (
-                  <span key={ext} className="ext-badge">.{ext}</span>
-                ))}
-              </div>
-            </div>
-          )}
-          {assignment.description && (
-            <div style={{ marginTop: '1.25rem' }}>
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Описание</div>
-              <p style={{ margin: 0, fontSize: '0.92rem', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
-                {assignment.description}
-              </p>
-            </div>
-          )}
-        </div>
+      <div ref={rightColRef} className="assignment-right">
+        <AssignmentLiveSidebar
+          assignmentId={assignmentId!}
+          base={assignment}
+          onClosedChange={handleClosedChange}
+        />
       </div>
 
       <Modal open={commentFor !== null} onClose={() => setCommentFor(null)} title="Комментарии">

@@ -57,6 +57,8 @@ SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 # Application definition
 
 INSTALLED_APPS = [
+    'daphne',
+    'channels',
     'unfold',
     'unfold.contrib.filters',
     'unfold.contrib.forms',
@@ -91,6 +93,7 @@ ROOT_URLCONF = 'config.urls'
 
 
 WSGI_APPLICATION = 'config.wsgi.application'
+ASGI_APPLICATION = 'config.asgi.application'
 
 
 # Database
@@ -141,6 +144,8 @@ AUTH_PASSWORD_VALIDATORS = [
 LANGUAGE_CODE = 'en-us'
 
 TIME_ZONE = 'Europe/Moscow'
+# JWT session end-of-day and lifetime cap use this zone explicitly (not UTC).
+SESSION_TIME_ZONE = 'Europe/Moscow'
 
 USE_I18N = True
 
@@ -191,7 +196,7 @@ LOGOUT_REDIRECT_URL = '/'
 # Django REST Framework + JWT
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        'apps.laboratory.authentication.LabworksJWTAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
@@ -202,8 +207,11 @@ from datetime import timedelta
 
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(hours=10),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'REFRESH_TOKEN_LIFETIME': timedelta(hours=10),
     'ROTATE_REFRESH_TOKENS': False,
+    'TOKEN_REFRESH_SERIALIZER': 'apps.laboratory.jwt.LabworksTokenRefreshSerializer',
+    'AUTH_TOKEN_CLASSES': ('apps.laboratory.jwt.LabworksAccessToken',),
+    'REFRESH_TOKEN_CLASSES': ('apps.laboratory.jwt.LabworksRefreshToken',),
 }
 
 # CORS (SPA frontend)
@@ -279,6 +287,11 @@ UNFOLD = {
                         "link": reverse_lazy("admin:laboratory_assignment_changelist"),
                     },
                     {
+                        "title": "Дедлайны",
+                        "icon": "schedule",
+                        "link": reverse_lazy("admin:laboratory_deadlineoverride_changelist"),
+                    },
+                    {
                         "title": "Сдачи",
                         "icon": "upload_file",
                         "link": reverse_lazy("admin:laboratory_submission_changelist"),
@@ -306,6 +319,16 @@ if os.environ.get('REDIS_URL'):
 # Celery
 CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', os.environ.get('REDIS_URL', 'redis://localhost:6379/0'))
 CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', CELERY_BROKER_URL)
+
+# Django Channels (WebSocket)
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            'hosts': [os.environ.get('REDIS_URL', 'redis://redis:6379/0')],
+        },
+    },
+}
 
 # S3 / MinIO (optional)
 if os.environ.get('AWS_STORAGE_BUCKET_NAME'):

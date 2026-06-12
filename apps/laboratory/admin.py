@@ -16,7 +16,8 @@ class ImportExportModelAdmin(_ImportExportBase, ModelAdmin):
 from .models import (
     CustomUser, Course, CourseImage, StudentGroup,
     Assignment, Submission, Comment, AssignmentEvent, LoginLog,
-    SiteSettings, get_site_settings, STUDENT_LABELS,
+    SiteSettings, DeadlineOverride, get_site_settings, STUDENT_LABELS,
+    SUBMISSION_FLAG_LABELS,
 )
 
 
@@ -65,6 +66,12 @@ def reset_password(modeladmin, request, queryset):
     )
 
 
+@admin.action(description="Активировать выбранных пользователей")
+def activate_users(modeladmin, request, queryset):
+    updated = queryset.update(is_active=True)
+    modeladmin.message_user(request, f"Активировано пользователей: {updated}.")
+
+
 @admin.register(CustomUser)
 class CustomUserAdmin(ImportExportModelAdmin, UserAdmin):
     resource_class = CustomUserResource
@@ -77,7 +84,7 @@ class CustomUserAdmin(ImportExportModelAdmin, UserAdmin):
     add_fieldsets = UserAdmin.add_fieldsets + (
         ("Дополнительная информация", {"fields": ("full_name", "student_groups", "label")}),
     )
-    actions = [reset_password]
+    actions = [reset_password, activate_users]
 
     @admin.display(description="Метка")
     def label_display(self, obj):
@@ -133,30 +140,113 @@ class CourseImageAdmin(ModelAdmin):
 @admin.register(StudentGroup)
 class StudentGroupAdmin(ImportExportModelAdmin):
     resource_class = StudentGroupResource
+    search_fields = ("name", "course__name")
+
+
+class DeadlineOverrideInline(admin.TabularInline):
+    model = DeadlineOverride
+    extra = 0
+    fields = ("user", "student_group", "close_time", "updated_by", "updated_at")
+    readonly_fields = ("updated_by", "updated_at")
+    autocomplete_fields = ("user", "student_group")
+    verbose_name = "Персональный дедлайн"
+    verbose_name_plural = "Персональные дедлайны (студент или группа)"
 
 
 @admin.register(Assignment)
 class AssignmentAdmin(ImportExportModelAdmin):
     resource_class = AssignmentResource
+    inlines = (DeadlineOverrideInline,)
     list_display = ("title", "course", "open_time", "close_time", "submissions_count")
     list_filter = ("course",)
     filter_horizontal = ("student_groups",)
+    search_fields = ("title", "course__name")
 
     @admin.display(description="Сдач")
     def submissions_count(self, obj):
         return obj.submissions.count()
 
+    def save_formset(self, request, form, formset, change):
+        instances = formset.save(commit=False)
+        for obj in instances:
+            if isinstance(obj, DeadlineOverride):
+                obj.updated_by = request.user
+            obj.save()
+        formset.save_m2m()
+        for obj in formset.deleted_objects:
+            obj.delete()
+
+
+@admin.register(DeadlineOverride)
+class DeadlineOverrideAdmin(ModelAdmin):
+    list_display = ("assignment", "target_display", "close_time", "updated_by", "updated_at")
+    list_filter = ("assignment__course",)
+    search_fields = ("assignment__title", "user__username", "user__full_name", "student_group__name")
+    autocomplete_fields = ("assignment", "user", "student_group")
+    readonly_fields = ("updated_by", "updated_at")
+
+    @admin.display(description="Студент / группа")
+    def target_display(self, obj):
+        if obj.user_id:
+            return obj.user.username
+        if obj.student_group_id:
+            return obj.student_group.name
+        return "—"
+
+    def save_model(self, request, obj, form, change):
+        obj.updated_by = request.user
+        super().save_model(request, obj, form, change)
+
+
+class CommentInline(admin.TabularInline):
+    model = Comment
+    extra = 0
+    fields = ("author", "text", "created_at")
+    readonly_fields = ("author", "created_at")
+
 
 @admin.register(Submission)
 class SubmissionAdmin(ImportExportModelAdmin):
     resource_class = SubmissionResource
+    inlines = (CommentInline,)
     list_display = (
         "id", "student", "student_label", "assignment", "submitted_at",
-        "flags_display", "verification_key_short",
+        "flags_display", "behavior_gpt_score", "verification_key_short",
     )
     list_filter = ("student__label", "assignment__course")
     search_fields = ("student__username", "student__full_name", "verification_payload", "admin_note")
-    readonly_fields = ("submitted_at", "verification_payload", "verification_signature")
+    readonly_fields = (
+        "submitted_at", "verification_payload", "verification_signature",
+        "behavior_clipboard_changes", "behavior_paste_count", "behavior_paste_chars",
+        "behavior_keystrokes", "behavior_tab_switches", "behavior_gpt_score",
+    )
+    fieldsets = (
+        (None, {
+            "fields": ("assignment", "student", "file", "text_response", "submitted_at"),
+        }),
+        ("Верификация", {
+            "fields": ("verification_payload", "verification_signature"),
+            "classes": ("collapse",),
+        }),
+        ("Администрирование", {
+            "fields": ("admin_note", "admin_flags"),
+            "description": (
+                "Флаги — JSON-массив кодов: "
+                + ", ".join(f"{code} ({label})" for code, label in SUBMISSION_FLAG_LABELS.items())
+            ),
+        }),
+        ("Поведенческая аналитика", {
+            "fields": (
+                "behavior_gpt_score",
+                "behavior_clipboard_changes",
+                "behavior_paste_count",
+                "behavior_paste_chars",
+                "behavior_keystrokes",
+                "behavior_tab_switches",
+            ),
+            "classes": ("collapse",),
+        }),
+    )
 
     @admin.display(description="Метка студента")
     def student_label(self, obj):

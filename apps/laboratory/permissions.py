@@ -22,7 +22,9 @@ class IsStudentInAssignmentGroup(permissions.BasePermission):
         assignment = obj if hasattr(obj, 'open_time') else getattr(obj, 'assignment', None)
         if assignment is None:
             return False
-        if not (assignment.open_time <= now <= assignment.close_time):
+        from apps.laboratory.services.deadline import get_effective_close_time
+        effective_close = get_effective_close_time(assignment, request.user)
+        if not (assignment.open_time <= now <= effective_close):
             return False
         user_groups = request.user.student_groups.all()
         return assignment.student_groups.filter(pk__in=user_groups).exists()

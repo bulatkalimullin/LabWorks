@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone as dt_timezone
 import hashlib
 import hmac
 from rest_framework import serializers
@@ -13,23 +13,32 @@ import pyotp
 from .models import (
     CustomUser, Course, CourseImage, StudentGroup, Assignment,
     Submission, Comment, AssignmentEvent, STUDENT_LABELS, LoginLog,
+    DeadlineOverride,
 )
+from .jwt import LabworksRefreshToken
+from .services.deadline import get_effective_close_time
 
 
 def _persist_refresh_token(refresh, user):
     """Ensure refresh token is stored in OutstandingToken for single-session blacklisting."""
-    if hasattr(refresh, 'outstand'):
-        refresh.outstand()
-        return
     payload = getattr(refresh, 'payload', None) or {}
     jti = payload.get('jti')
-    exp = payload.get('exp')
+    exp = payload.get('session_exp') or payload.get('exp')
+    token_str = str(refresh)
     if jti and exp is not None:
-        expires_at = datetime.fromtimestamp(exp, tz=timezone.utc)
-        OutstandingToken.objects.get_or_create(
+        expires_at = datetime.fromtimestamp(int(exp), tz=dt_timezone.utc)
+        ot, _created = OutstandingToken.objects.get_or_create(
             jti=jti,
-            defaults={'user': user, 'token': str(refresh), 'expires_at': expires_at},
+            defaults={'user': user, 'token': token_str, 'expires_at': expires_at},
         )
+        if ot.token != token_str or ot.expires_at != expires_at:
+            ot.token = token_str
+            ot.expires_at = expires_at
+            ot.user = user
+            ot.save(update_fields=['token', 'expires_at', 'user'])
+        return
+    if hasattr(refresh, 'outstand'):
+        refresh.outstand()
 
 
 def _compute_submission_download_hash(submission) -> str:
@@ -98,15 +107,16 @@ class AssignmentSerializer(serializers.ModelSerializer):
     course_name = serializers.CharField(source='course.name', read_only=True)
     submissions_count = serializers.SerializerMethodField()
     file_url = serializers.SerializerMethodField(read_only=True)
+    effective_close_time = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Assignment
         fields = (
             'id', 'title', 'description', 'course', 'course_id', 'course_name',
             'student_groups', 'allowed_extensions', 'open_time', 'close_time',
-            'files', 'file_url', 'submissions_count',
+            'effective_close_time', 'files', 'file_url', 'submissions_count',
         )
-        read_only_fields = ('id', 'file_url')
+        read_only_fields = ('id', 'file_url', 'effective_close_time')
 
     def get_submissions_count(self, obj):
         return obj.submissions.count()
@@ -114,8 +124,55 @@ class AssignmentSerializer(serializers.ModelSerializer):
     def get_file_url(self, obj):
         if not obj.files:
             return None
-        # Always return relative URL; it will be fetched with auth.
         return f'/api/v1/assignments/{obj.id}/download-file/'
+
+    def get_effective_close_time(self, obj):
+        request = self.context.get('request')
+        user = getattr(request, 'user', None) if request else None
+        if not user or not user.is_authenticated or user.is_staff:
+            return None
+        return get_effective_close_time(obj, user)
+
+
+class DeadlineOverrideSerializer(serializers.ModelSerializer):
+    user_username = serializers.CharField(source='user.username', read_only=True)
+    group_name = serializers.CharField(source='student_group.name', read_only=True)
+    add_minutes = serializers.IntegerField(
+        required=False,
+        write_only=True,
+        min_value=1,
+        help_text='Добавить минуты к текущему дедлайну (вместо абсолютного close_time).',
+    )
+
+    class Meta:
+        model = DeadlineOverride
+        fields = (
+            'id', 'assignment', 'close_time', 'add_minutes', 'user', 'student_group',
+            'user_username', 'group_name', 'updated_at',
+        )
+        read_only_fields = ('id', 'updated_at', 'user_username', 'group_name')
+        extra_kwargs = {
+            'close_time': {'required': False},
+        }
+
+    def validate(self, attrs):
+        user = attrs.get('user', getattr(self.instance, 'user', None))
+        group = attrs.get('student_group', getattr(self.instance, 'student_group', None))
+        if bool(user) == bool(group):
+            raise serializers.ValidationError(
+                'Укажите ровно одно: user или student_group.'
+            )
+        close_time = attrs.get('close_time')
+        add_minutes = attrs.get('add_minutes')
+        if self.instance is None and close_time is None and add_minutes is None:
+            raise serializers.ValidationError(
+                'Укажите close_time или add_minutes.'
+            )
+        if close_time is not None and add_minutes is not None:
+            raise serializers.ValidationError(
+                'Укажите либо close_time, либо add_minutes, не оба сразу.'
+            )
+        return attrs
 
 
 class CommentSerializer(serializers.ModelSerializer):
@@ -202,6 +259,7 @@ class CustomUserSerializer(serializers.ModelSerializer):
 
 class AdminUserSerializer(serializers.ModelSerializer):
     submissions_count = serializers.SerializerMethodField()
+    student_groups = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
     student_groups_names = serializers.SerializerMethodField()
     label_display = serializers.SerializerMethodField()
 
@@ -210,7 +268,7 @@ class AdminUserSerializer(serializers.ModelSerializer):
         fields = (
             'id', 'username', 'full_name', 'is_staff', 'is_active',
             'label', 'label_display', 'totp_enabled',
-            'submissions_count', 'student_groups_names', 'date_joined',
+            'submissions_count', 'student_groups', 'student_groups_names', 'date_joined',
         )
         read_only_fields = ('id', 'is_staff', 'date_joined', 'totp_enabled')
 
@@ -357,6 +415,10 @@ class RegisterSerializer(serializers.Serializer):
 class TokenObtainPairWith2FASerializer(TokenObtainPairSerializer):
     """JWT login; if user has totp_enabled, totp_code is required."""
     totp_code = serializers.CharField(required=False, allow_blank=True, write_only=True)
+
+    @classmethod
+    def get_token(cls, user):
+        return LabworksRefreshToken.for_user(user)
 
     def validate(self, attrs):
         username = attrs.get('username')

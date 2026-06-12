@@ -34,6 +34,7 @@ api.interceptors.response.use(
       } catch {
         localStorage.removeItem('access')
         localStorage.removeItem('refresh')
+        localStorage.removeItem('user')
         window.location.replace('/login')
       }
     }
@@ -82,114 +83,21 @@ export type Assignment = {
   allowed_extensions: string
   open_time: string
   close_time: string
+  effective_close_time?: string
+  student_groups?: number[]
+  files?: string | null
   file_url?: string | null
 }
 
-export const STUDENT_LABELS: { code: string; name: string }[] = [
-  { code: 'strong', name: 'Сильный ученик' },
-  { code: 'above_avg', name: 'Выше среднего' },
-  { code: 'avg', name: 'Средний' },
-  { code: 'struggling', name: 'Слабый' },
-  { code: 'cheats', name: 'Списывает' },
-  { code: 'gpt', name: 'GPT' },
-  { code: 'gpt_suspected', name: 'Подозрение на GPT' },
-  { code: 'plagiarism', name: 'Плагиат' },
-  { code: 'plagiarism_suspected', name: 'Подозрение на плагиат' },
-  { code: 'inactive', name: 'Неактивный' },
-  { code: 'excellent', name: 'Отличник' },
-  { code: 'creative', name: 'Творческий подход' },
-  { code: 'hardworking', name: 'Трудолюбивый' },
-  { code: 'fast', name: 'Быстрый' },
-  { code: 'needs_help', name: 'Нуждается в помощи' },
-  { code: 'improving', name: 'Прогрессирует' },
-  { code: 'declining', name: 'Снизил активность' },
-  { code: 'leader', name: 'Лидер' },
-  { code: 'disruptive', name: 'Проблемный' },
-  { code: 'absent', name: 'Часто отсутствует' },
-]
-
-export const LABEL_COLORS: Record<string, string> = {
-  strong: '#10b981',
-  above_avg: '#3b82f6',
-  avg: '#94a3b8',
-  struggling: '#f59e0b',
-  cheats: '#ef4444',
-  gpt: '#8b5cf6',
-  gpt_suspected: '#a855f7',
-  plagiarism: '#dc2626',
-  plagiarism_suspected: '#f87171',
-  inactive: '#6b7280',
-  excellent: '#fbbf24',
-  creative: '#06b6d4',
-  hardworking: '#84cc16',
-  fast: '#22c55e',
-  needs_help: '#fb923c',
-  improving: '#34d399',
-  declining: '#e5c347',
-  leader: '#818cf8',
-  disruptive: '#f43f5e',
-  absent: '#94a3b8',
-}
-
-export const SUBMISSION_FLAGS: { code: string; name: string }[] = [
-  { code: 'suspicious', name: 'Подозрительное' },
-  { code: 'plagiarism', name: 'Плагиат' },
-  { code: 'gpt', name: 'GPT' },
-  { code: 'excellent', name: 'Отличная работа' },
-  { code: 'accepted', name: 'Зачтено' },
-  { code: 'rejected', name: 'Не зачтено' },
-  { code: 'needs_review', name: 'Требует проверки' },
-  { code: 'revised', name: 'Исправлена' },
-  { code: 'incomplete', name: 'Неполная' },
-  { code: 'strong_work', name: 'Сильная работа' },
-]
-
-export type BehaviorEvent = {
-  event_type: 'CLIPBOARD_CHANGE' | 'PASTE_DETECTED' | 'TAB_SWITCH' | 'KEYLOG_BATCH'
-  created_at: string
-  metadata: { content?: string; length?: number; keys?: { key: string; t: number }[]; [key: string]: unknown }
-}
-
-export type AdminSubmission = {
+export type DeadlineOverride = {
   id: number
   assignment: string
-  assignment_title: string
-  course_name: string
-  student: number
-  student_username: string
-  student_full_name: string
-  student_label: string
-  student_label_display: string
-  file_url: string | null
-  text_response: string | null
-  submitted_at: string
-  admin_note: string
-  admin_flags: string[]
-  verification_payload: string | null
-  verification_signature: string | null
-  comments: AdminComment[]
-  timing: {
-    first_view_at: string | null
-    first_start_at: string | null
-    submit_at: string
-    time_from_view_to_submit: number | null
-    time_from_start_to_submit: number | null
-  }
-  behavior_clipboard_changes: number
-  behavior_paste_count: number
-  behavior_paste_chars: number
-  behavior_keystrokes: number
-  behavior_tab_switches: number
-  behavior_gpt_score: number
-  behavior_events: BehaviorEvent[]
-}
-
-export type AdminComment = {
-  id: number
-  author_username: string
-  author_full_name: string
-  text: string
-  created_at: string
+  close_time: string
+  user: number | null
+  student_group: number | null
+  user_username?: string
+  group_name?: string
+  updated_at?: string
 }
 
 export type AdminUser = {
@@ -198,22 +106,7 @@ export type AdminUser = {
   full_name: string
   is_staff: boolean
   is_active: boolean
-  label: string
-  label_display: string
-  totp_enabled: boolean
-  submissions_count: number
-  student_groups_names: string[]
-  date_joined: string
-}
-
-export type AdminStats = {
-  total_students: number
-  total_courses: number
-  total_assignments: number
-  total_submissions: number
-  recent_submissions: number
-  submissions_by_day: { date: string; count: number }[]
-  label_distribution: Record<string, number>
-  top_assignments: { title: string; sub_count: number }[]
-  student_labels: { code: string; name: string }[]
+  label?: string
+  totp_enabled?: boolean
+  student_groups?: number[]
 }

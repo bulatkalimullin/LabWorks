@@ -2,24 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, type Assignment, type Course } from '../api/client'
 import { useAuth } from '../context/AuthContext'
-import { ArrowLeft, ChevronLeft, ChevronRight, Clock, Shield } from 'lucide-react'
-
-function getStatus(a: Assignment): 'open' | 'closing-soon' | 'closed' | 'pending' {
-  const now = Date.now()
-  const open = new Date(a.open_time).getTime()
-  const close = new Date(a.close_time).getTime()
-  if (now < open) return 'pending'
-  if (now > close) return 'closed'
-  if (close - now < 60 * 60 * 1000) return 'closing-soon'
-  return 'open'
-}
-
-const STATUS_LABELS: Record<string, string> = {
-  open: 'Открыто',
-  'closing-soon': 'Скоро закрывается',
-  closed: 'Закрыто',
-  pending: 'Ещё не открыто',
-}
+import AssignmentCourseRow from '../components/AssignmentCourseRow'
+import { assignmentRealtimeStore } from '../lib/assignmentRealtimeStore'
+import { ArrowLeft, ChevronLeft, ChevronRight, Shield } from 'lucide-react'
 
 const ROTATE_BG_INTERVAL_MS = 5500
 
@@ -111,7 +96,7 @@ export default function CourseDetailPage() {
   const { courseId } = useParams<{ courseId: string }>()
   const [course, setCourse] = useState<Course | null>(null)
   const [assignments, setAssignments] = useState<Assignment[]>([])
-  const { user } = useAuth()
+  const { user, isLoading } = useAuth()
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -125,9 +110,19 @@ export default function CourseDetailPage() {
           (a) => a.course === Number(courseId) || a.course_id === Number(courseId)
         )
         setAssignments(list)
+        list.forEach((a) => assignmentRealtimeStore.mergeAssignment(a))
       })
       .catch(() => setAssignments([]))
   }, [courseId])
+
+  if (isLoading) {
+    return (
+      <div style={{ padding: '2rem', maxWidth: 800, margin: '0 auto' }}>
+        <div className="skeleton" style={{ height: 32, width: 200, marginBottom: 16 }} />
+        <div className="skeleton" style={{ height: 120 }} />
+      </div>
+    )
+  }
 
   if (!user?.is_staff && !user?.totp_enabled) {
     return (
@@ -166,33 +161,9 @@ export default function CourseDetailPage() {
 
       <h2 style={{ marginBottom: '0.75rem', fontSize: '1.1rem', color: 'var(--text-muted)' }}>Задания</h2>
       <ul style={{ listStyle: 'none', padding: 0 }}>
-        {assignments.map((a) => {
-          const status = getStatus(a)
-          return (
-            <li
-              key={a.id}
-              className="glass card-hover"
-              style={{ marginBottom: '0.75rem', padding: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
-                <Clock size={16} style={{ flexShrink: 0, opacity: 0.6 }} />
-                <span style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {a.title}
-                </span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-                <span className={`status-badge status-${status}`}>{STATUS_LABELS[status]}</span>
-                <Link
-                  to={`/assignment/${a.id}`}
-                  className="btn btn-primary btn-sm"
-                  style={{ padding: '0.4rem 0.8rem' }}
-                >
-                  Открыть
-                </Link>
-              </div>
-            </li>
-          )
-        })}
+        {assignments.map((a) => (
+          <AssignmentCourseRow key={a.id} assignment={a} />
+        ))}
       </ul>
       {assignments.length === 0 && <p style={{ color: 'var(--text-muted)' }}>Нет доступных заданий.</p>}
       </div>

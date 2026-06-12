@@ -1,9 +1,12 @@
 import hashlib
 import hmac
+import mimetypes
+import os
 import secrets
 import uuid
 import zipfile
 from io import BytesIO
+from urllib.parse import quote
 
 from django.conf import settings
 from django.core.cache import cache
@@ -14,11 +17,16 @@ from rest_framework import viewsets, status, generics
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
-from rest_framework_simplejwt.tokens import RefreshToken
+from .jwt import LabworksRefreshToken, assert_session_active
+from rest_framework_simplejwt.exceptions import TokenError
+from rest_framework_simplejwt.settings import api_settings
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
 import pyotp
 
-from .models import Course, Assignment, Submission, StudentGroup, Comment, CustomUser, AssignmentEvent, STUDENT_LABELS, get_site_settings
+from .models import (
+    Course, Assignment, Submission, StudentGroup, Comment, CustomUser,
+    AssignmentEvent, DeadlineOverride, STUDENT_LABELS, get_site_settings,
+)
 from .serializers import (
     CourseSerializer,
     AssignmentSerializer,
@@ -29,6 +37,7 @@ from .serializers import (
     CustomUserSerializer,
     StudentGroupSerializer,
     CommentSerializer,
+    DeadlineOverrideSerializer,
     TokenObtainPairWith2FASerializer,
     PasswordChangeSerializer,
     ProfileUpdateSerializer,
@@ -38,7 +47,13 @@ from .serializers import (
     TwoFADisableSerializer,
     _persist_refresh_token,
 )
+from .authentication import JWTAuthHeaderOrQuery
 from .permissions import IsTeacher
+from .services.deadline import (
+    get_effective_close_time,
+    is_assignment_open_for_user,
+    resolve_override_close_time,
+)
 
 
 @api_view(['GET'])
@@ -66,13 +81,22 @@ def _build_file_response(file_field, as_attachment: bool = True):
     if settings.DEBUG:
         return FileResponse(file_field.open('rb'), as_attachment=as_attachment, filename=filename)
 
+    # Nginx reads X-Accel-Redirect as a plain URI; non-ASCII must be percent-encoded
+    # (otherwise Django MIME-encodes the header and nginx fails with 404).
+    media_uri = '/protected-media/' + quote(file_field.name, safe='/')
+    content_type, _ = mimetypes.guess_type(filename)
+    if not content_type:
+        content_type = 'application/octet-stream'
+
     response = HttpResponse()
-    response['X-Accel-Redirect'] = f'/protected-media/{file_field.name}'
+    response['X-Accel-Redirect'] = media_uri
+    response['Content-Type'] = content_type
     disposition_type = 'attachment' if as_attachment else 'inline'
-    response['Content-Disposition'] = f'{disposition_type}; filename="{filename}"'
-    # Nginx controls the actual content-type.
-    if 'Content-Type' in response:
-        del response['Content-Type']
+    ext = os.path.splitext(filename)[1] or ''
+    ascii_name = f'download{ext}' if ext else 'download'
+    response['Content-Disposition'] = (
+        f'{disposition_type}; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(filename)}'
+    )
     return response
 
 
@@ -91,9 +115,19 @@ def session_check(request):
         return Response({'detail': 'refresh required'}, status=status.HTTP_401_UNAUTHORIZED)
     ot = OutstandingToken.objects.filter(token=refresh_str).first()
     if not ot:
+        try:
+            parsed = LabworksRefreshToken(refresh_str)
+            ot = OutstandingToken.objects.filter(jti=parsed[api_settings.JTI_CLAIM]).first()
+        except TokenError:
+            ot = None
+    if not ot:
         return Response({'detail': 'session invalid'}, status=status.HTTP_401_UNAUTHORIZED)
     if BlacklistedToken.objects.filter(token=ot).exists():
         return Response({'detail': 'session replaced'}, status=status.HTTP_401_UNAUTHORIZED)
+    try:
+        assert_session_active(LabworksRefreshToken(refresh_str))
+    except TokenError:
+        return Response({'detail': 'session expired'}, status=status.HTTP_401_UNAUTHORIZED)
     return Response({'ok': True})
 
 
@@ -123,7 +157,7 @@ class RegisterView(generics.CreateAPIView):
         # Single-session: invalidate any previous refresh tokens for this user
         for ot in OutstandingToken.objects.filter(user=user):
             BlacklistedToken.objects.get_or_create(token=ot)
-        refresh = RefreshToken.for_user(user)
+        refresh = LabworksRefreshToken.for_user(user)
         # Persist new refresh token so it can be blacklisted on next login (single-session)
         _persist_refresh_token(refresh, user)
         return Response({
@@ -292,17 +326,23 @@ class AssignmentViewSet(viewsets.ModelViewSet):
         if getattr(self.request.user, 'is_staff', False):
             return qs
         now = timezone.now()
-        user_groups = self.request.user.student_groups.all()
-        return qs.filter(
+        user = self.request.user
+        user_groups = user.student_groups.all()
+        candidates = qs.filter(
             student_groups__in=user_groups,
             open_time__lte=now,
-            close_time__gte=now,
         ).distinct()
+        open_ids = [
+            a.pk for a in candidates
+            if get_effective_close_time(a, user) >= now
+        ]
+        return qs.filter(pk__in=open_ids)
 
     def get_permissions(self):
-        if self.action in ('create', 'update', 'partial_update', 'destroy', 'submissions'):
-            if self.action == 'submissions':
-                return [IsAuthenticated(), IsTeacher()]
+        if self.action in (
+            'create', 'update', 'partial_update', 'destroy',
+            'submissions', 'deadline_overrides',
+        ):
             return [IsAuthenticated(), IsTeacher()]
         return super().get_permissions()
 
@@ -317,7 +357,12 @@ class AssignmentViewSet(viewsets.ModelViewSet):
         qs = Submission.objects.filter(assignment=assignment).select_related('student').prefetch_related('comments__author')
         return Response(SubmissionSerializer(qs, many=True, context={'request': request}).data)
 
-    @action(detail=True, methods=['get'], url_path='download-file')
+    @action(
+        detail=True,
+        methods=['get'],
+        url_path='download-file',
+        authentication_classes=[JWTAuthHeaderOrQuery],
+    )
     def download_file(self, request, pk=None):
         assignment = self.get_object()
         if not assignment.files:
@@ -326,6 +371,20 @@ class AssignmentViewSet(viewsets.ModelViewSet):
             return _build_file_response(assignment.files, as_attachment=True)
         except Exception:
             raise Http404
+
+    @action(detail=True, methods=['get', 'post'], url_path='deadline-overrides')
+    def deadline_overrides(self, request, pk=None):
+        assignment = self.get_object()
+        if request.method == 'GET':
+            qs = DeadlineOverride.objects.filter(assignment=assignment).select_related(
+                'user', 'student_group', 'updated_by',
+            ).order_by('-updated_at')
+            return Response(DeadlineOverrideSerializer(qs, many=True).data)
+        payload = {**request.data, 'assignment': str(assignment.id)}
+        serializer = DeadlineOverrideSerializer(data=payload)
+        serializer.is_valid(raise_exception=True)
+        obj = _upsert_deadline_override(serializer, request.user)
+        return Response(DeadlineOverrideSerializer(obj).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['post'], url_path='events', permission_classes=[IsAuthenticated])
     def record_event(self, request, pk=None):
@@ -413,10 +472,9 @@ class SubmissionViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         assignment = serializer.validated_data['assignment']
         if not self.request.user.is_staff:
-            now = timezone.now()
-            if not (assignment.open_time <= now <= assignment.close_time):
+            if not is_assignment_open_for_user(assignment, self.request.user):
                 from rest_framework.exceptions import PermissionDenied
-                raise PermissionDenied('Задание недоступно по времени.')
+                raise PermissionDenied('Срок сдачи истёк.')
             user_groups = self.request.user.student_groups.all()
             if not assignment.student_groups.filter(pk__in=user_groups).exists():
                 from rest_framework.exceptions import PermissionDenied
@@ -463,7 +521,12 @@ class SubmissionViewSet(viewsets.ModelViewSet):
         submission.verification_signature = sig
         submission.save(update_fields=['verification_payload', 'verification_signature'])
 
-    @action(detail=True, methods=['get'], url_path='download')
+    @action(
+        detail=True,
+        methods=['get'],
+        url_path='download',
+        authentication_classes=[JWTAuthHeaderOrQuery],
+    )
     def download(self, request, pk=None):
         submission = self.get_object()
         if not submission.file:
@@ -484,11 +547,10 @@ class SubmissionViewSet(viewsets.ModelViewSet):
             return Response(status=status.HTTP_403_FORBIDDEN)
         # Student can download only within the assignment open window.
         if not request.user.is_staff:
-            now = timezone.now()
             assignment = submission.assignment
-            if not (assignment.open_time <= now <= assignment.close_time):
+            if not is_assignment_open_for_user(assignment, request.user):
                 return Response(
-                    {'detail': 'Задание недоступно по времени. Скачивание работы недоступно.'},
+                    {'detail': 'Срок сдачи истёк. Скачивание работы недоступно.'},
                     status=status.HTTP_403_FORBIDDEN,
                 )
 
@@ -533,6 +595,77 @@ class SubmissionViewSet(viewsets.ModelViewSet):
                 return Response({'detail': 'Пустой комментарий'}, status=status.HTTP_400_BAD_REQUEST)
             c = Comment.objects.create(submission=submission, author=request.user, text=text)
             return Response(CommentSerializer(c).data, status=status.HTTP_201_CREATED)
+
+
+def _upsert_deadline_override(serializer, actor):
+    data = serializer.validated_data
+    assignment = data['assignment']
+    user = data.get('user')
+    group = data.get('student_group')
+    close_time = resolve_override_close_time(
+        assignment,
+        user=user,
+        student_group=group,
+        close_time=data.get('close_time'),
+        add_minutes=data.get('add_minutes'),
+    )
+    if user:
+        obj, _created = DeadlineOverride.objects.update_or_create(
+            assignment=assignment,
+            user=user,
+            defaults={
+                'close_time': close_time,
+                'student_group': None,
+                'updated_by': actor,
+            },
+        )
+    else:
+        obj, _created = DeadlineOverride.objects.update_or_create(
+            assignment=assignment,
+            student_group=group,
+            defaults={
+                'close_time': close_time,
+                'user': None,
+                'updated_by': actor,
+            },
+        )
+    serializer.instance = obj
+    return obj
+
+
+class DeadlineOverrideViewSet(viewsets.ModelViewSet):
+    serializer_class = DeadlineOverrideSerializer
+    permission_classes = [IsAuthenticated, IsTeacher]
+
+    def get_queryset(self):
+        qs = DeadlineOverride.objects.select_related(
+            'assignment', 'user', 'student_group', 'updated_by',
+        )
+        assignment_id = self.request.query_params.get('assignment')
+        if assignment_id:
+            qs = qs.filter(assignment_id=assignment_id)
+        return qs.order_by('-updated_at')
+
+    def perform_create(self, serializer):
+        _upsert_deadline_override(serializer, self.request.user)
+
+    def perform_update(self, serializer):
+        instance = serializer.instance
+        data = serializer.validated_data
+        assignment = data.get('assignment', instance.assignment)
+        user = data.get('user', instance.user)
+        group = data.get('student_group', instance.student_group)
+        if 'close_time' in data or 'add_minutes' in data:
+            close_time = resolve_override_close_time(
+                assignment,
+                user=user,
+                student_group=group,
+                close_time=data.get('close_time'),
+                add_minutes=data.get('add_minutes'),
+            )
+            serializer.save(close_time=close_time, updated_by=self.request.user)
+        else:
+            serializer.save(updated_by=self.request.user)
 
 
 class AdminSubmissionViewSet(viewsets.ReadOnlyModelViewSet):
