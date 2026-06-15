@@ -75,8 +75,8 @@ export function AssignmentRealtimeProvider({ children }: { children: ReactNode }
       }
       if (notify && event.changed_fields.length > 0) {
         const labels = event.changed_fields
-          .map((f) => FIELD_LABELS[f] ?? f)
-          .filter((v, i, arr) => arr.indexOf(v) === i)
+          .map((f: string) => FIELD_LABELS[f] ?? f)
+          .filter((v: string, i: number, arr: string[]) => arr.indexOf(v) === i)
         toast(`Задание обновлено: изменено ${labels.join(', ')}`, 'info')
       }
     },

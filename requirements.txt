@@ -19,3 +19,4 @@ pyotp
 django-unfold
 django-import-export
 Pillow
+pika==1.3.2

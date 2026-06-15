@@ -110,6 +110,10 @@ class Assignment(models.Model):
     open_time = models.DateTimeField()
     close_time = models.DateTimeField()
     files = models.FileField(upload_to='assignments/', blank=True, null=True)
+    auto_deploy = models.BooleanField(
+        default=False,
+        help_text='Автоматически разворачивать проект на checker при сдаче архива',
+    )
 
     def __str__(self):
         return self.title
@@ -184,6 +188,26 @@ class Submission(models.Model):
 
     def __str__(self):
         return f"{self.student.username} - {self.assignment.title}"
+
+
+class StudentDeployment(models.Model):
+    STATUS_CHOICES = [
+        ('pending', 'Ожидание'),
+        ('deploying', 'Развёртывание'),
+        ('running', 'Запущен'),
+        ('error', 'Ошибка'),
+    ]
+    student = models.OneToOneField(CustomUser, on_delete=models.CASCADE, related_name='deployment')
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='pending')
+    access_urls = models.JSONField(default=list, blank=True)
+    traceback = models.TextField(blank=True, default='')
+    public_base_url = models.URLField(blank=True, default='', max_length=512)
+    last_submission_uuid = models.UUIDField(null=True, blank=True)
+    checker_project_id = models.IntegerField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'Deployment {self.student.username} ({self.status})'
 
 
 class Comment(models.Model):

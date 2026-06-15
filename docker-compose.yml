@@ -50,7 +50,11 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost,http://127.0.0.1,http://frontend}
+      CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-}
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,api,nginx,api_backend}
+      RABBITMQ_URL: ${RABBITMQ_URL:-}
+      DEPLOY_SERVICE_TOKEN: ${DEPLOY_SERVICE_TOKEN:-}
+      LABWORKS_PUBLIC_URL: ${LABWORKS_PUBLIC_URL:-http://localhost}
       SSL_DOMAIN: ${SSL_DOMAIN:-}
       # MinIO S3-compatible (optional; uncomment when bucket created)
       # AWS_ACCESS_KEY_ID: minio
@@ -83,6 +87,7 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost,http://127.0.0.1,http://frontend}
+      CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-}
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,api,nginx,api_backend,daphne}
       SSL_DOMAIN: ${SSL_DOMAIN:-}
     volumes:
@@ -114,6 +119,26 @@ services:
       - api
     networks:
       - app-network
+
+  deploy-result-consumer:
+    build: .
+    command: python manage.py consume_deploy_results
+    environment:
+      TZ: Europe/Moscow
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-change-me-in-prod}
+      POSTGRES_HOST: ${POSTGRES_HOST:-db}
+      POSTGRES_DB: ${POSTGRES_DB:-filecompetition}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      RABBITMQ_URL: ${RABBITMQ_URL:-}
+      DEPLOY_SERVICE_TOKEN: ${DEPLOY_SERVICE_TOKEN:-}
+      LABWORKS_PUBLIC_URL: ${LABWORKS_PUBLIC_URL:-http://localhost}
+    depends_on:
+      - db
+      - api
+    networks:
+      - app-network
+    restart: unless-stopped
 
   frontend:
     build: ./frontend

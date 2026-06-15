@@ -13,7 +13,7 @@ import pyotp
 from .models import (
     CustomUser, Course, CourseImage, StudentGroup, Assignment,
     Submission, Comment, AssignmentEvent, STUDENT_LABELS, LoginLog,
-    DeadlineOverride,
+    DeadlineOverride, StudentDeployment,
 )
 from .jwt import LabworksRefreshToken
 from .services.deadline import get_effective_close_time
@@ -114,7 +114,7 @@ class AssignmentSerializer(serializers.ModelSerializer):
         fields = (
             'id', 'title', 'description', 'course', 'course_id', 'course_name',
             'student_groups', 'allowed_extensions', 'open_time', 'close_time',
-            'effective_close_time', 'files', 'file_url', 'submissions_count',
+            'effective_close_time', 'files', 'file_url', 'submissions_count', 'auto_deploy',
         )
         read_only_fields = ('id', 'file_url', 'effective_close_time')
 
@@ -185,6 +185,15 @@ class CommentSerializer(serializers.ModelSerializer):
         read_only_fields = ('id', 'author', 'created_at')
 
 
+class StudentDeploymentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StudentDeployment
+        fields = (
+            'status', 'access_urls', 'traceback', 'public_base_url',
+            'last_submission_uuid', 'checker_project_id', 'updated_at',
+        )
+
+
 class SubmissionSerializer(serializers.ModelSerializer):
     student_username = serializers.CharField(source='student.username', read_only=True)
     assignment_title = serializers.CharField(source='assignment.title', read_only=True)
@@ -194,16 +203,18 @@ class SubmissionSerializer(serializers.ModelSerializer):
     verification_short = serializers.SerializerMethodField()
     verification_payload = serializers.SerializerMethodField()
     verification_signature = serializers.SerializerMethodField()
+    student_deployment = serializers.SerializerMethodField()
 
     class Meta:
         model = Submission
         fields = (
-            'id', 'assignment', 'student', 'student_username',
+            'id', 'uuid', 'assignment', 'student', 'student_username',
             'assignment_title', 'assignment_close_time', 'file', 'file_url', 'text_response',
             'submitted_at', 'comments',
             'verification_short', 'verification_payload', 'verification_signature',
+            'student_deployment',
         )
-        read_only_fields = ('id', 'student', 'submitted_at', 'comments',
+        read_only_fields = ('id', 'uuid', 'student', 'submitted_at', 'comments',
                             'verification_short', 'verification_payload', 'verification_signature')
 
     def get_file_url(self, obj):
@@ -228,6 +239,15 @@ class SubmissionSerializer(serializers.ModelSerializer):
         if request and request.user.is_staff:
             return obj.verification_signature or None
         return None
+
+    def get_student_deployment(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_staff:
+            return None
+        deployment = getattr(obj.student, 'deployment', None)
+        if not deployment:
+            return None
+        return StudentDeploymentSerializer(deployment).data
 
     def validate(self, attrs):
         file = attrs.get('file')

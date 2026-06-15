@@ -26,6 +26,7 @@ import pyotp
 from .models import (
     Course, Assignment, Submission, StudentGroup, Comment, CustomUser,
     AssignmentEvent, DeadlineOverride, STUDENT_LABELS, get_site_settings,
+    StudentDeployment,
 )
 from .serializers import (
     CourseSerializer,
@@ -449,7 +450,7 @@ class SubmissionViewSet(viewsets.ModelViewSet):
         return submission
 
     def get_queryset(self):
-        qs = Submission.objects.select_related('assignment', 'student').prefetch_related('comments__author')
+        qs = Submission.objects.select_related('assignment', 'student', 'student__deployment').prefetch_related('comments__author')
         if self.request.user.is_staff:
             assignment_id = self.request.query_params.get('assignment')
             if assignment_id:
@@ -499,6 +500,25 @@ class SubmissionViewSet(viewsets.ModelViewSet):
             submission.download_salt = secrets.token_hex(32)  # 64 hex chars
             submission.save(update_fields=['download_salt'])
         self._stamp_verification(submission, self.request)
+        if submission.file and submission.assignment.auto_deploy:
+            try:
+                from .deploy_publisher import publish_deploy_request
+                publish_deploy_request(submission, trigger='auto')
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).exception('Auto deploy publish failed: %s', exc)
+
+    @action(detail=True, methods=['post'], url_path='deploy', permission_classes=[IsAuthenticated, IsTeacher])
+    def deploy(self, request, pk=None):
+        submission = self.get_object()
+        if not submission.file:
+            return Response({'detail': 'Нет файла для деплоя'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            from .deploy_publisher import publish_deploy_request
+            payload = publish_deploy_request(submission, trigger='manual')
+            return Response({'detail': 'Деплой поставлен в очередь', 'event_id': payload['event_id']})
+        except Exception as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
 
     @staticmethod
     def _stamp_verification(submission, request):
