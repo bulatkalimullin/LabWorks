@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
 
 from . import api_views
+from . import internal_views
 
 router = DefaultRouter()
 router.register(r'courses', api_views.CourseViewSet, basename='course')
@@ -35,4 +36,9 @@ urlpatterns = [
     path('export/group/<int:group_id>/', api_views.export_group_submissions, name='api-export-group'),
     path('export/assignment/<uuid:assignment_id>/', api_views.export_assignment_submissions, name='api-export-assignment'),
     path('export/smart/<uuid:assignment_id>/', api_views.export_smart_submissions, name='api-export-smart'),
+    path(
+        'internal/deploy/submissions/<uuid:submission_uuid>/file/',
+        internal_views.internal_submission_file,
+        name='api-internal-deploy-file',
+    ),
 ]

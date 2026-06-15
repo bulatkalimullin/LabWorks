@@ -1,0 +1,18 @@
+# Локальный запуск без Traefik и без домена:
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+#
+# Открыть: http://localhost:8090
+# RabbitMQ — только на сервере demo-exam-checker (см. RABBITMQ_URL в .env)
+
+services:
+  nginx:
+    ports:
+      - "8090:80"
+    networks:
+      - app-network
+    labels: []
+
+networks:
+  proxy:
+    external: false
+    driver: bridge

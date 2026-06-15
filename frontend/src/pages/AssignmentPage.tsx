@@ -24,10 +24,21 @@ import {
   MessageSquare,
   Search,
   Shield,
+  Rocket,
 } from 'lucide-react'
+
+type DeploymentInfo = {
+  status: string
+  access_urls: { service: string; container_port?: number; host_port?: number; url: string }[]
+  traceback?: string
+  public_base_url?: string
+  last_submission_uuid?: string | null
+  updated_at?: string
+}
 
 type Submission = {
   id: number
+  uuid?: string
   assignment: string
   submitted_at: string
   file_url: string | null
@@ -36,6 +47,7 @@ type Submission = {
   verification_short?: string | null
   verification_payload?: string | null
   verification_signature?: string | null
+  student_deployment?: DeploymentInfo | null
 }
 
 function getFileExtension(path: string): string {
@@ -446,6 +458,34 @@ export default function AssignmentPage() {
     }
   }, [assignmentId])
 
+  const [deployingId, setDeployingId] = useState<number | null>(null)
+
+  async function deploySubmission(submissionUuid: string, submissionId: number) {
+    setDeployingId(submissionId)
+    try {
+      await api.post(`/submissions/${submissionUuid}/deploy/`)
+      toast('Деплой поставлен в очередь', 'success')
+      const r = await api.get(`/assignments/${assignmentId}/submissions/`)
+      setSubmissions(r.data)
+    } catch (err) {
+      toast(parseApiError(err), 'error')
+    } finally {
+      setDeployingId(null)
+    }
+  }
+
+  async function toggleAutoDeploy() {
+    if (!liveAssignment) return
+    try {
+      const next = !liveAssignment.auto_deploy
+      await api.patch(`/assignments/${liveAssignment.id}/`, { auto_deploy: next })
+      setAssignment((a) => (a ? { ...a, auto_deploy: next } : a))
+      toast(next ? 'Автодеплой включён' : 'Автодеплой выключен', 'success')
+    } catch (err) {
+      toast(parseApiError(err), 'error')
+    }
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     if (!assignmentId || !liveAssignment) return
@@ -574,7 +614,7 @@ export default function AssignmentPage() {
   }
 
   const allowedExtensions = liveAssignment.allowed_extensions
-    ? liveAssignment.allowed_extensions.split(',').map((e) => e.trim()).filter(Boolean)
+    ? liveAssignment.allowed_extensions.split(',').map((e: string) => e.trim()).filter(Boolean)
     : []
 
   return (
@@ -596,6 +636,17 @@ export default function AssignmentPage() {
             </div>
 
             <AssignmentDeadlinePanel assignment={liveAssignment} />
+
+            <div className="glass" style={{ padding: '1rem', marginBottom: '1rem' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={!!liveAssignment.auto_deploy}
+                  onChange={toggleAutoDeploy}
+                />
+                <span>Автодеплой при сдаче (RabbitMQ → checker)</span>
+              </label>
+            </div>
 
             {submissions.length > 0 && (
               <div className="glass" style={{ padding: '1rem' }}>
@@ -645,7 +696,52 @@ export default function AssignmentPage() {
                         >
                           <MessageSquare size={16} />
                         </button>
+                        {s.file_url && (
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            style={{ padding: '0.35rem 0.6rem' }}
+                            disabled={deployingId === s.id}
+                            onClick={() => deploySubmission(String(s.uuid ?? s.id), s.id)}
+                            title="Развернуть на checker"
+                          >
+                            <Rocket size={16} />
+                          </button>
+                        )}
                       </div>
+                      {s.student_deployment && (
+                        <div style={{ marginTop: 8, fontSize: '0.82rem' }}>
+                          <strong>Деплой:</strong>{' '}
+                          <span style={{
+                            color: s.student_deployment.status === 'running' ? 'var(--success)' :
+                              s.student_deployment.status === 'error' ? 'var(--danger)' : 'var(--text-muted)',
+                          }}>
+                            {s.student_deployment.status}
+                          </span>
+                          {s.student_deployment.access_urls?.length > 0 && (
+                            <ul style={{ margin: '4px 0 0', paddingLeft: 16 }}>
+                              {s.student_deployment.access_urls.map((u) => (
+                                <li key={u.url}>
+                                  <a href={u.url} target="_blank" rel="noreferrer">{u.service}: {u.url}</a>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                          {s.student_deployment.traceback && (
+                            <details style={{ marginTop: 6 }}>
+                              <summary style={{ color: 'var(--danger)', cursor: 'pointer' }}>Traceback</summary>
+                              <pre style={{
+                                fontSize: '0.75rem',
+                                overflow: 'auto',
+                                maxHeight: 200,
+                                background: 'rgba(0,0,0,0.2)',
+                                padding: 8,
+                                borderRadius: 6,
+                              }}>{s.student_deployment.traceback}</pre>
+                            </details>
+                          )}
+                        </div>
+                      )}
                       {expandedVerify === s.id && s.verification_payload && (
                         <div className="verify-expand">
                           <div className="verify-row">

@@ -16,7 +16,7 @@ class ImportExportModelAdmin(_ImportExportBase, ModelAdmin):
 from .models import (
     CustomUser, Course, CourseImage, StudentGroup,
     Assignment, Submission, Comment, AssignmentEvent, LoginLog,
-    SiteSettings, DeadlineOverride, get_site_settings, STUDENT_LABELS,
+    SiteSettings, DeadlineOverride, StudentDeployment, get_site_settings, STUDENT_LABELS,
     SUBMISSION_FLAG_LABELS,
 )
 
@@ -157,7 +157,7 @@ class DeadlineOverrideInline(admin.TabularInline):
 class AssignmentAdmin(ImportExportModelAdmin):
     resource_class = AssignmentResource
     inlines = (DeadlineOverrideInline,)
-    list_display = ("title", "course", "open_time", "close_time", "submissions_count")
+    list_display = ("title", "course", "open_time", "close_time", "auto_deploy", "submissions_count")
     list_filter = ("course",)
     filter_horizontal = ("student_groups",)
     search_fields = ("title", "course__name")
@@ -304,3 +304,10 @@ class SiteSettingsAdmin(ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+@admin.register(StudentDeployment)
+class StudentDeploymentAdmin(ModelAdmin):
+    list_display = ('student', 'status', 'checker_project_id', 'updated_at')
+    search_fields = ('student__username', 'student__full_name')
+    readonly_fields = ('access_urls', 'traceback', 'public_base_url', 'last_submission_uuid', 'updated_at')

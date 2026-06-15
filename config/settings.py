@@ -222,6 +222,11 @@ CORS_ALLOWED_ORIGINS = [
 ]
 CORS_ALLOW_CREDENTIALS = True
 
+# CSRF: доверяем тем же origin, что и CORS (иначе 403 при POST с :8090 и т.п.)
+for _origin in CORS_ALLOWED_ORIGINS:
+    if _origin not in CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS.append(_origin)
+
 from django.urls import reverse_lazy
 
 UNFOLD = {
@@ -340,3 +345,9 @@ if os.environ.get('AWS_STORAGE_BUCKET_NAME'):
     AWS_S3_ENDPOINT_URL = os.environ.get('AWS_S3_ENDPOINT_URL', '')  # MinIO: http://minio:9000
     AWS_S3_ADDRESSING_STYLE = os.environ.get('AWS_S3_ADDRESSING_STYLE', 'path')
     AWS_QUERYSTRING_AUTH = False
+
+# Deploy integration (LabWorks -> RabbitMQ -> demo-exam-checker)
+RABBITMQ_URL = os.environ.get('RABBITMQ_URL', '')
+DEPLOY_SERVICE_TOKEN = os.environ.get('DEPLOY_SERVICE_TOKEN', '')
+DEPLOY_EXCHANGE = os.environ.get('DEPLOY_EXCHANGE', 'labworks.deploy')
+LABWORKS_PUBLIC_URL = os.environ.get('LABWORKS_PUBLIC_URL', 'http://localhost:8000')

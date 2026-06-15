@@ -87,6 +87,7 @@ export type Assignment = {
   student_groups?: number[]
   files?: string | null
   file_url?: string | null
+  auto_deploy?: boolean
 }
 
 export type DeadlineOverride = {
