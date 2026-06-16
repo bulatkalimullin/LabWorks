@@ -34,6 +34,9 @@ def setup_topology(channel):
     channel.queue_bind(queue=LABWORKS_RESULTS_QUEUE, exchange=DEPLOY_EXCHANGE, routing_key=DEPLOY_RESULT_ROUTING_KEY)
 
 
+from .deploy_phases import DEPLOY_PHASE_QUEUED
+
+
 def publish_deploy_request(submission, trigger: str = 'auto'):
     from .models import StudentDeployment
 
@@ -55,10 +58,34 @@ def publish_deploy_request(submission, trigger: str = 'auto'):
         'requested_at': datetime.now(timezone.utc).isoformat(),
     }
 
+    from .services.deploy_status import checker_public_url
+
+    checker_base = checker_public_url()
     deployment, _ = StudentDeployment.objects.get_or_create(student=student)
-    deployment.status = 'deploying'
+    deployment.status = DEPLOY_PHASE_QUEUED
     deployment.last_submission_uuid = submission.uuid
-    deployment.save(update_fields=['status', 'last_submission_uuid', 'updated_at'])
+    deployment.deploy_url = ''
+    deployment.deploy_snapshot = {
+        'label': 'Подготовка',
+        'hint': 'Скоро начнём публикацию вашего проекта на стенде',
+        'progress': 12,
+        'message': 'Подготовка',
+        'messages': [{
+            'text': 'Скоро начнём публикацию вашего проекта на стенде',
+            'phase': 'queued',
+            'kind': 'hint',
+            'at': datetime.now(timezone.utc).isoformat(),
+        }],
+        'links': {
+            'docs': f'{checker_base}/docs/',
+            'panel': f'{checker_base}/deploy/panel/?submission_uuid={submission.uuid}&embed=1',
+            'status_api': f'{checker_base}/api/deploy/status/',
+        },
+    }
+    deployment.save(update_fields=['status', 'last_submission_uuid', 'deploy_url', 'deploy_snapshot', 'updated_at'])
+
+    from .services.realtime import broadcast_deployment_update
+    broadcast_deployment_update(deployment)
 
     connection = _connect()
     try:

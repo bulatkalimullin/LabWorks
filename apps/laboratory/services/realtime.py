@@ -7,7 +7,8 @@ from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.utils import timezone
 
-from apps.laboratory.models import Assignment, CustomUser, DeadlineOverride
+from apps.laboratory.models import Assignment, CustomUser, DeadlineOverride, StudentDeployment
+from apps.laboratory.services.deploy_status import build_deployment_api_payload
 from apps.laboratory.services.deadline import get_affected_user_ids, get_affected_user_ids_for_override, get_effective_close_time
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,38 @@ def diff_assignment_fields(old: Assignment | None, new: Assignment) -> list[str]
 
 def _user_channel(user_id: int) -> str:
     return f'assignment_user_{user_id}'
+
+
+STAFF_WS_GROUP = 'assignment_staff_all'
+
+
+def build_deployment_payload(deployment: StudentDeployment) -> dict[str, Any]:
+    return build_deployment_api_payload(deployment)
+
+
+def get_deployment_snapshot_for_user(user: CustomUser) -> dict[str, Any] | None:
+    deployment = StudentDeployment.objects.filter(student=user).select_related('student').first()
+    if not deployment:
+        return None
+    return build_deployment_payload(deployment)
+
+
+def broadcast_deployment_update(deployment: StudentDeployment) -> None:
+    channel_layer = get_channel_layer()
+    if channel_layer is None:
+        logger.warning('No channel layer configured; skipping deployment broadcast')
+        return
+
+    if not hasattr(deployment, 'student') or deployment.student is None:
+        deployment = StudentDeployment.objects.select_related('student').get(pk=deployment.pk)
+
+    payload = build_deployment_payload(deployment)
+    event = {
+        'type': 'deployment_updated',
+        'payload': payload,
+    }
+    async_to_sync(channel_layer.group_send)(_user_channel(deployment.student_id), event)
+    async_to_sync(channel_layer.group_send)(STAFF_WS_GROUP, event)
 
 
 def broadcast_assignment_update(

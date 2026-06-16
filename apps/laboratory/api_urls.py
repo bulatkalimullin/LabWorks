@@ -36,6 +36,7 @@ urlpatterns = [
     path('export/group/<int:group_id>/', api_views.export_group_submissions, name='api-export-group'),
     path('export/assignment/<uuid:assignment_id>/', api_views.export_assignment_submissions, name='api-export-assignment'),
     path('export/smart/<uuid:assignment_id>/', api_views.export_smart_submissions, name='api-export-smart'),
+    path('deploy/status/', api_views.deploy_status_proxy, name='api-deploy-status'),
     path(
         'internal/deploy/submissions/<uuid:submission_uuid>/file/',
         internal_views.internal_submission_file,

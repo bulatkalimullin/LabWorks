@@ -3,6 +3,12 @@ from django.db import models
 from django.contrib.auth.models import AbstractUser, Group as AuthGroup
 from uuid import uuid4
 
+from apps.laboratory.deploy_phases import (
+    DEPLOY_PHASE_CHOICES,
+    DEPLOY_PHASE_QUEUED,
+    deploy_phase_message,
+)
+
 STUDENT_LABELS = [
     ('', '—'),
     ('strong', 'Сильный ученик'),
@@ -191,20 +197,20 @@ class Submission(models.Model):
 
 
 class StudentDeployment(models.Model):
-    STATUS_CHOICES = [
-        ('pending', 'Ожидание'),
-        ('deploying', 'Развёртывание'),
-        ('running', 'Запущен'),
-        ('error', 'Ошибка'),
-    ]
     student = models.OneToOneField(CustomUser, on_delete=models.CASCADE, related_name='deployment')
-    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='pending')
+    status = models.CharField(max_length=20, choices=DEPLOY_PHASE_CHOICES, default=DEPLOY_PHASE_QUEUED)
     access_urls = models.JSONField(default=list, blank=True)
     traceback = models.TextField(blank=True, default='')
     public_base_url = models.URLField(blank=True, default='', max_length=512)
     last_submission_uuid = models.UUIDField(null=True, blank=True)
     checker_project_id = models.IntegerField(null=True, blank=True)
+    deploy_snapshot = models.JSONField(default=dict, blank=True)
+    deploy_url = models.URLField(blank=True, default='', max_length=512)
     updated_at = models.DateTimeField(auto_now=True)
+
+    @property
+    def status_label(self) -> str:
+        return deploy_phase_message(self.status)
 
     def __str__(self):
         return f'Deployment {self.student.username} ({self.status})'

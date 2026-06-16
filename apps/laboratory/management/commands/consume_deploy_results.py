@@ -1,15 +1,25 @@
 import json
+import re
 
 from django.core.management.base import BaseCommand
-
-from apps.laboratory.deploy_publisher import setup_topology
+from apps.laboratory.deploy_publisher import setup_topology, _connect
+from apps.laboratory.services.deploy_status import apply_checker_payload_to_deployment
 from apps.laboratory.models import StudentDeployment
 from apps.laboratory.rabbitmq_config import LABWORKS_RESULTS_QUEUE
-from apps.laboratory.deploy_publisher import _connect
 
 
 class Command(BaseCommand):
     help = 'Consume deploy.result messages and update StudentDeployment records'
+
+    @staticmethod
+    def _sanitize_traceback(raw: str) -> str:
+        text = (raw or '').strip()
+        if not text:
+            return ''
+        if text.lstrip().startswith('<') or '<!doctype' in text.lower():
+            match = re.search(r'<title>([^<]+)</title>', text, re.I)
+            return f'HTML-ошибка: {match.group(1)}' if match else 'HTML-ошибка от checker'
+        return text[:4000]
 
     def handle(self, *args, **options):
         self.stdout.write(self.style.SUCCESS('Listening for deploy results...'))
@@ -39,12 +49,12 @@ class Command(BaseCommand):
         if not deployment:
             deployment = StudentDeployment.objects.create(student_id=student_id)
 
-        deployment.status = data.get('status', 'error')
-        deployment.access_urls = data.get('public_urls') or []
-        deployment.traceback = data.get('traceback') or ''
-        deployment.public_base_url = data.get('public_base_url') or ''
-        if data.get('submission_uuid'):
-            deployment.last_submission_uuid = data['submission_uuid']
-        deployment.checker_project_id = data.get('checker_project_id')
+        apply_checker_payload_to_deployment(deployment, data)
+        deployment.traceback = self._sanitize_traceback(
+            data.get('error_details') or data.get('traceback') or data.get('docker_log') or '',
+        )
         deployment.save()
         self.stdout.write(f'Updated deployment for student {student_id}: {deployment.status}')
+
+        from apps.laboratory.services.realtime import broadcast_deployment_update
+        broadcast_deployment_update(deployment)

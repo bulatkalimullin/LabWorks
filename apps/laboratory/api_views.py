@@ -1,12 +1,15 @@
 import hashlib
 import hmac
+import json
 import mimetypes
 import os
 import secrets
 import uuid
 import zipfile
 from io import BytesIO
-from urllib.parse import quote
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote, urlencode
+from urllib.request import Request, urlopen
 
 from django.conf import settings
 from django.core.cache import cache
@@ -923,3 +926,53 @@ def _zip_response(submissions, filename):
     response = HttpResponse(buffer.getvalue(), content_type='application/zip')
     response['Content-Disposition'] = f'attachment; filename={filename}'
     return response
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def deploy_status_proxy(request):
+    submission_uuid = request.query_params.get('submission_uuid')
+    if not submission_uuid:
+        return Response({'error': 'submission_uuid is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        submission = Submission.objects.select_related('student').get(uuid=submission_uuid)
+    except (Submission.DoesNotExist, ValueError):
+        return Response({'error': 'submission not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if not request.user.is_staff and submission.student_id != request.user.id:
+        return Response(status=status.HTTP_403_FORBIDDEN)
+
+    checker_base = settings.CHECKER_PUBLIC_URL.rstrip('/')
+    query = urlencode({'submission_uuid': str(submission_uuid)})
+    checker_url = f'{checker_base}/api/deploy/status/?{query}'
+    req = Request(checker_url, headers={'Accept': 'application/json'})
+
+    try:
+        with urlopen(req, timeout=12) as resp:
+            payload = json.loads(resp.read().decode('utf-8'))
+    except HTTPError as exc:
+        body = exc.read().decode('utf-8', errors='replace')
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError:
+            payload = {'error': body or f'Checker HTTP {exc.code}'}
+        return Response(payload, status=exc.code)
+    except (URLError, TimeoutError, json.JSONDecodeError) as exc:
+        return Response(
+            {'error': f'Checker unavailable: {exc}'},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+
+    deployment = StudentDeployment.objects.filter(student_id=submission.student_id).first()
+    if deployment:
+        from .services.deploy_status import apply_checker_payload_to_deployment
+        apply_checker_payload_to_deployment(deployment, payload)
+        deployment.save(update_fields=[
+            'status', 'access_urls', 'deploy_url', 'public_base_url',
+            'last_submission_uuid', 'checker_project_id', 'deploy_snapshot', 'updated_at',
+        ])
+        from .services.realtime import broadcast_deployment_update
+        broadcast_deployment_update(deployment)
+
+    return Response(payload)

@@ -17,6 +17,7 @@ from .models import (
 )
 from .jwt import LabworksRefreshToken
 from .services.deadline import get_effective_close_time
+from .deploy_phases import deploy_phase_message
 
 
 def _persist_refresh_token(refresh, user):
@@ -186,12 +187,66 @@ class CommentSerializer(serializers.ModelSerializer):
 
 
 class StudentDeploymentSerializer(serializers.ModelSerializer):
+    status_label = serializers.SerializerMethodField()
+    phase = serializers.CharField(source='status', read_only=True)
+    label = serializers.SerializerMethodField()
+    hint = serializers.SerializerMethodField()
+    progress = serializers.SerializerMethodField()
+    url = serializers.SerializerMethodField()
+    error = serializers.SerializerMethodField()
+    links = serializers.SerializerMethodField()
+    steps = serializers.SerializerMethodField()
+    messages = serializers.SerializerMethodField()
+    public_urls = serializers.SerializerMethodField()
+
     class Meta:
         model = StudentDeployment
         fields = (
-            'status', 'access_urls', 'traceback', 'public_base_url',
+            'status', 'phase', 'status_label', 'label', 'hint', 'progress', 'url', 'error',
+            'links', 'steps', 'messages', 'access_urls', 'public_urls', 'traceback', 'public_base_url',
             'last_submission_uuid', 'checker_project_id', 'updated_at',
         )
+
+    def _snapshot(self, obj):
+        return obj.deploy_snapshot or {}
+
+    def get_status_label(self, obj):
+        return self.get_label(obj)
+
+    def get_label(self, obj):
+        return self._snapshot(obj).get('label') or deploy_phase_message(obj.status)
+
+    def get_hint(self, obj):
+        return self._snapshot(obj).get('hint', '')
+
+    def get_progress(self, obj):
+        return self._snapshot(obj).get('progress')
+
+    def get_url(self, obj):
+        return obj.deploy_url or self._snapshot(obj).get('url')
+
+    def get_error(self, obj):
+        return self._snapshot(obj).get('error')
+
+    def get_links(self, obj):
+        from apps.laboratory.services.deploy_status import build_deployment_api_payload
+        return build_deployment_api_payload(obj).get('links', {})
+
+    def get_steps(self, obj):
+        return self._snapshot(obj).get('steps') or []
+
+    def get_messages(self, obj):
+        return self._snapshot(obj).get('messages') or []
+
+    def get_public_urls(self, obj):
+        return obj.access_urls or []
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get('request')
+        if not request or not request.user.is_staff:
+            data.pop('traceback', None)
+        return data
 
 
 class SubmissionSerializer(serializers.ModelSerializer):
@@ -242,7 +297,9 @@ class SubmissionSerializer(serializers.ModelSerializer):
 
     def get_student_deployment(self, obj):
         request = self.context.get('request')
-        if not request or not request.user.is_staff:
+        if not request or not request.user.is_authenticated:
+            return None
+        if not request.user.is_staff and obj.student_id != request.user.id:
             return None
         deployment = getattr(obj.student, 'deployment', None)
         if not deployment:

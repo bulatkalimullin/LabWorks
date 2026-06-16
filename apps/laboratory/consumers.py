@@ -6,7 +6,11 @@ from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 
 from apps.laboratory.jwt import LabworksAccessToken, assert_session_active
 from apps.laboratory.models import CustomUser
-from apps.laboratory.services.realtime import get_assignments_snapshot_for_user
+from apps.laboratory.services.realtime import (
+    STAFF_WS_GROUP,
+    get_assignments_snapshot_for_user,
+    get_deployment_snapshot_for_user,
+)
 
 
 @database_sync_to_async
@@ -26,8 +30,13 @@ def get_snapshot(user):
     return get_assignments_snapshot_for_user(user)
 
 
+@database_sync_to_async
+def get_deployment_snapshot(user):
+    return get_deployment_snapshot_for_user(user)
+
+
 class AssignmentConsumer(AsyncWebsocketConsumer):
-    """WebSocket: real-time assignment updates for students."""
+    """WebSocket: assignment + deployment updates for students and staff."""
 
     async def connect(self):
         query_string = self.scope.get('query_string', b'').decode()
@@ -35,8 +44,14 @@ class AssignmentConsumer(AsyncWebsocketConsumer):
         token = params.get('token') or params.get('access')
         self.scope['user'] = await get_user_from_jwt(token)
         user = self.scope['user']
-        if not user or user.is_staff:
+        if not user:
             await self.close(code=4001)
+            return
+
+        if user.is_staff:
+            self.group_name = STAFF_WS_GROUP
+            await self.channel_layer.group_add(self.group_name, self.channel_name)
+            await self.accept()
             return
 
         self.user_id = user.id
@@ -50,6 +65,13 @@ class AssignmentConsumer(AsyncWebsocketConsumer):
             'payload': snapshot,
         }))
 
+        deployment = await get_deployment_snapshot(user)
+        if deployment:
+            await self.send(text_data=json.dumps({
+                'type': 'deployment_snapshot',
+                'payload': deployment,
+            }))
+
     async def disconnect(self, code):
         if hasattr(self, 'group_name'):
             await self.channel_layer.group_discard(self.group_name, self.channel_name)
@@ -59,5 +81,11 @@ class AssignmentConsumer(AsyncWebsocketConsumer):
             'type': 'assignment_updated',
             'assignment_id': event.get('assignment_id'),
             'changed_fields': event.get('changed_fields', []),
+            'payload': event.get('payload', {}),
+        }))
+
+    async def deployment_updated(self, event):
+        await self.send(text_data=json.dumps({
+            'type': 'deployment_updated',
             'payload': event.get('payload', {}),
         }))
