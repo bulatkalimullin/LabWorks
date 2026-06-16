@@ -14,6 +14,13 @@ import FileDropzone from '../components/FileDropzone'
 import CommentSection from '../components/CommentSection'
 import Modal from '../components/Modal'
 import MermaidBlock from '../components/MermaidBlock'
+import StudentDeploymentPanel from '../components/StudentDeploymentPanel'
+import DeploymentStatus, {
+  type DeploymentInfo,
+  deploymentMatchesSubmission,
+} from '../components/DeploymentStatus'
+import { deploymentRealtimeStore } from '../lib/deploymentRealtimeStore'
+import { useDeploymentForStudent } from '../hooks/useDeploymentLive'
 import {
   ArrowLeft,
   CheckCircle2,
@@ -21,25 +28,18 @@ import {
   Download,
   FileArchive,
   KeyRound,
+  Loader2,
   MessageSquare,
+  Rocket,
   Search,
   Shield,
-  Rocket,
 } from 'lucide-react'
-
-type DeploymentInfo = {
-  status: string
-  access_urls: { service: string; container_port?: number; host_port?: number; url: string }[]
-  traceback?: string
-  public_base_url?: string
-  last_submission_uuid?: string | null
-  updated_at?: string
-}
 
 type Submission = {
   id: number
   uuid?: string
   assignment: string
+  student?: number
   submitted_at: string
   file_url: string | null
   text_response: string | null
@@ -48,6 +48,22 @@ type Submission = {
   verification_payload?: string | null
   verification_signature?: string | null
   student_deployment?: DeploymentInfo | null
+}
+
+function SubmissionDeployment({
+  studentId,
+  submissionUuid,
+  fallback,
+}: {
+  studentId?: number
+  submissionUuid?: string | null
+  fallback?: DeploymentInfo | null
+}) {
+  const live = useDeploymentForStudent(studentId)
+  const deployment = live ?? fallback ?? null
+  if (!deployment) return null
+  if (!deploymentMatchesSubmission(deployment, submissionUuid)) return null
+  return <DeploymentStatus deployment={deployment} compact />
 }
 
 function getFileExtension(path: string): string {
@@ -153,6 +169,7 @@ export default function AssignmentPage() {
   const [submissionClosed, setSubmissionClosed] = useState(false)
   const [submitSuccess, setSubmitSuccess] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [deploySubmitError, setDeploySubmitError] = useState<string | null>(null)
   const [expandedVerify, setExpandedVerify] = useState<number | null>(null)
   const [assignmentMarkdown, setAssignmentMarkdown] = useState<string | null>(null)
   const [markdownLoading, setMarkdownLoading] = useState(false)
@@ -230,6 +247,20 @@ export default function AssignmentPage() {
   }, [assignmentId, user?.is_staff, isLoading])
 
   const liveAssignment = useAssignmentLive(assignmentId, assignment ?? undefined)
+
+  const studentDeploymentFallback = useMemo(() => {
+    for (let i = submissions.length - 1; i >= 0; i--) {
+      if (submissions[i].student_deployment) return submissions[i].student_deployment
+    }
+    return null
+  }, [submissions])
+
+  const latestSubmissionUuid = useMemo(() => {
+    for (let i = submissions.length - 1; i >= 0; i--) {
+      if (submissions[i].uuid) return String(submissions[i].uuid)
+    }
+    return null
+  }, [submissions])
   const handleClosedChange = useCallback((closed: boolean) => setSubmissionClosed(closed), [])
 
   // Markdown fetch with AbortController
@@ -401,6 +432,10 @@ export default function AssignmentPage() {
 
   useEffect(() => { refreshSubmissions() }, [refreshSubmissions])
 
+  useEffect(() => {
+    deploymentRealtimeStore.seedFromSubmissions(submissions)
+  }, [submissions])
+
   const handleFileSelect = useCallback((f: File | null) => {
     setFile(f)
     if (f && !startWorkFired.current && !user?.is_staff && assignmentId) {
@@ -524,6 +559,7 @@ export default function AssignmentPage() {
     form.append('behavior_tab_switches', String(tabSwitches.current))
     form.append('behavior_gpt_score', String(Math.min(10, gptScore)))
     setSubmitting(true)
+    setDeploySubmitError(null)
     try {
       await api.post('/submissions/', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
@@ -538,7 +574,12 @@ export default function AssignmentPage() {
       setTextResponse('')
       refreshSubmissions()
     } catch (err) {
-      toast(parseApiError(err), 'error')
+      const message = parseApiError(err)
+      if (liveAssignment?.auto_deploy) {
+        setDeploySubmitError(message)
+      } else {
+        toast(message, 'error')
+      }
     } finally {
       setSubmitting(false)
     }
@@ -644,7 +685,7 @@ export default function AssignmentPage() {
                   checked={!!liveAssignment.auto_deploy}
                   onChange={toggleAutoDeploy}
                 />
-                <span>Автодеплой при сдаче (RabbitMQ → checker)</span>
+                <span>Автодеплой при сдаче на тестовый стенд</span>
               </label>
             </div>
 
@@ -705,43 +746,19 @@ export default function AssignmentPage() {
                             onClick={() => deploySubmission(String(s.uuid ?? s.id), s.id)}
                             title="Развернуть на checker"
                           >
-                            <Rocket size={16} />
+                            {deployingId === s.id ? (
+                              <Loader2 size={16} className="deploy-status__spinner" />
+                            ) : (
+                              <Rocket size={16} />
+                            )}
                           </button>
                         )}
                       </div>
-                      {s.student_deployment && (
-                        <div style={{ marginTop: 8, fontSize: '0.82rem' }}>
-                          <strong>Деплой:</strong>{' '}
-                          <span style={{
-                            color: s.student_deployment.status === 'running' ? 'var(--success)' :
-                              s.student_deployment.status === 'error' ? 'var(--danger)' : 'var(--text-muted)',
-                          }}>
-                            {s.student_deployment.status}
-                          </span>
-                          {s.student_deployment.access_urls?.length > 0 && (
-                            <ul style={{ margin: '4px 0 0', paddingLeft: 16 }}>
-                              {s.student_deployment.access_urls.map((u) => (
-                                <li key={u.url}>
-                                  <a href={u.url} target="_blank" rel="noreferrer">{u.service}: {u.url}</a>
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                          {s.student_deployment.traceback && (
-                            <details style={{ marginTop: 6 }}>
-                              <summary style={{ color: 'var(--danger)', cursor: 'pointer' }}>Traceback</summary>
-                              <pre style={{
-                                fontSize: '0.75rem',
-                                overflow: 'auto',
-                                maxHeight: 200,
-                                background: 'rgba(0,0,0,0.2)',
-                                padding: 8,
-                                borderRadius: 6,
-                              }}>{s.student_deployment.traceback}</pre>
-                            </details>
-                          )}
-                        </div>
-                      )}
+                      <SubmissionDeployment
+                        studentId={s.student}
+                        submissionUuid={s.uuid ? String(s.uuid) : null}
+                        fallback={s.student_deployment}
+                      />
                       {expandedVerify === s.id && s.verification_payload && (
                         <div className="verify-expand">
                           <div className="verify-row">
@@ -837,6 +854,14 @@ export default function AssignmentPage() {
                 <CheckCircle2 size={20} /> Работа принята!
               </div>
             )}
+
+            <StudentDeploymentPanel
+              studentId={user?.id}
+              submissionUuid={latestSubmissionUuid}
+              fallback={studentDeploymentFallback}
+              pending={submitting && !!liveAssignment?.auto_deploy && !!file}
+              submitError={deploySubmitError}
+            />
 
             <div className={`glass ${submissionClosed ? 'submission-form--closed' : ''}`} style={{ padding: '1.25rem' }}>
               <h3 style={{ margin: '0 0 1rem', fontSize: '1rem' }}>Отправить работу</h3>

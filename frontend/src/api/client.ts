@@ -42,14 +42,44 @@ api.interceptors.response.use(
   }
 )
 
+export function isHtmlErrorPayload(text: string): boolean {
+  return /<!DOCTYPE|<html/i.test(text)
+}
+
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&#x27;/g, "'")
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+}
+
+export function extractHtmlApiError(html: string): string {
+  const title = html.match(/<title>([^<]+)<\/title>/i)?.[1]?.trim()
+  const exceptionValue = html.match(/<pre class="exception_value">([\s\S]*?)<\/pre>/i)?.[1]
+  const traceback = html.match(/<textarea[^>]*id="traceback_area"[^>]*>([\s\S]*?)<\/textarea>/i)?.[1]
+
+  const parts: string[] = []
+  if (title) parts.push(decodeHtmlEntities(title))
+  if (exceptionValue) parts.push(decodeHtmlEntities(exceptionValue.trim()))
+  if (traceback) parts.push(decodeHtmlEntities(traceback.trim()))
+
+  return parts.length ? parts.join('\n\n') : 'Ошибка сервера при отправке работы.'
+}
+
 export function parseApiError(err: unknown): string {
-  const anyErr = err as { response?: { data?: any } }
+  const anyErr = err as { response?: { data?: any; status?: number } }
   const data = anyErr.response?.data
   if (!data) return 'Произошла ошибка. Попробуйте ещё раз.'
 
   if (typeof data.detail === 'string') return data.detail
 
-  if (typeof data === 'string') return data
+  if (typeof data === 'string') {
+    if (isHtmlErrorPayload(data)) return extractHtmlApiError(data)
+    return data
+  }
 
   if (typeof data === 'object') {
     const parts: string[] = []

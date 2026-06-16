@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { AssignmentUpdatedEvent } from '../context/AssignmentRealtimeContext'
+import type { DeploymentWirePayload } from '../lib/deploymentRealtimeStore'
 
 function wsBase(): string {
   const env = import.meta.env.VITE_WS_URL as string | undefined
@@ -12,11 +13,17 @@ export function useAssignmentWebSocket(
   enabled: boolean,
   onSnapshot: (assignments: AssignmentUpdatedEvent['payload'][]) => void,
   onUpdate: (event: AssignmentUpdatedEvent) => void,
+  onDeploymentSnapshot?: (payload: DeploymentWirePayload) => void,
+  onDeploymentUpdate?: (payload: DeploymentWirePayload) => void,
 ) {
   const onSnapshotRef = useRef(onSnapshot)
   const onUpdateRef = useRef(onUpdate)
+  const onDeploymentSnapshotRef = useRef(onDeploymentSnapshot)
+  const onDeploymentUpdateRef = useRef(onDeploymentUpdate)
   onSnapshotRef.current = onSnapshot
   onUpdateRef.current = onUpdate
+  onDeploymentSnapshotRef.current = onDeploymentSnapshot
+  onDeploymentUpdateRef.current = onDeploymentUpdate
 
   useEffect(() => {
     if (!enabled) return
@@ -41,7 +48,7 @@ export function useAssignmentWebSocket(
         try {
           const data = JSON.parse(ev.data as string) as {
             type: string
-            payload?: AssignmentUpdatedEvent['payload'][] | AssignmentUpdatedEvent['payload']
+            payload?: AssignmentUpdatedEvent['payload'][] | AssignmentUpdatedEvent['payload'] | DeploymentWirePayload
             assignment_id?: string
             changed_fields?: string[]
           }
@@ -53,6 +60,10 @@ export function useAssignmentWebSocket(
               changed_fields: data.changed_fields ?? [],
               payload: data.payload as AssignmentUpdatedEvent['payload'],
             })
+          } else if (data.type === 'deployment_snapshot' && data.payload && !Array.isArray(data.payload)) {
+            onDeploymentSnapshotRef.current?.(data.payload as DeploymentWirePayload)
+          } else if (data.type === 'deployment_updated' && data.payload && !Array.isArray(data.payload)) {
+            onDeploymentUpdateRef.current?.(data.payload as DeploymentWirePayload)
           }
         } catch {
           // ignore malformed messages

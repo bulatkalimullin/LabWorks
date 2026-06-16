@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
+import { extractHtmlApiError, isHtmlErrorPayload } from '../api/client'
 
 type Toast = { id: number; message: string; type: 'success' | 'error' | 'info' }
 
@@ -10,7 +11,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([])
   const toast = useCallback((message: string, type: Toast['type'] = 'info') => {
     const id = Date.now()
-    setToasts((t) => [...t, { id, message, type }])
+    const safe = isHtmlErrorPayload(message) ? extractHtmlApiError(message) : message
+    setToasts((t) => [...t, { id, message: safe, type }])
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4000)
   }, [])
   return (

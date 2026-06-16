@@ -14,6 +14,20 @@ import {
   type AssignmentPayload,
   type AssignmentUpdatedEvent,
 } from '../lib/assignmentRealtimeStore'
+import {
+  deploymentRealtimeStore,
+  type DeploymentWirePayload,
+} from '../lib/deploymentRealtimeStore'
+
+const DEPLOYMENT_STATUS_LABELS: Record<string, string> = {
+  queued: 'в очереди',
+  downloading: 'скачивание архива',
+  deploying: 'деплоится',
+  ready_to_test: 'готово к тестированию',
+  error: 'ошибка деплоя',
+  pending: 'в очереди',
+  running: 'готово к тестированию',
+}
 
 export type { AssignmentPayload, AssignmentUpdatedEvent }
 
@@ -87,8 +101,30 @@ export function AssignmentRealtimeProvider({ children }: { children: ReactNode }
     assignmentRealtimeStore.applySnapshot(list)
   }, [])
 
-  const wsEnabled = isAuthenticated && !!user && !user.is_staff
-  useAssignmentWebSocket(wsEnabled, handleSnapshot, (event) => applyUpdate(event, true))
+  const handleDeploymentUpdate = useCallback(
+    (payload: DeploymentWirePayload, notify = true) => {
+      deploymentRealtimeStore.applyUpdate(payload)
+      if (notify) {
+        const phase = payload.phase ?? payload.status ?? 'queued'
+        const label = payload.label
+          || payload.status_label
+          || DEPLOYMENT_STATUS_LABELS[phase]
+          || phase
+        const who = payload.student_username ? `${payload.student_username}: ` : ''
+        toast(`${who}${label}`, phase === 'error' ? 'error' : 'info')
+      }
+    },
+    [toast],
+  )
+
+  const wsEnabled = isAuthenticated && !!user
+  useAssignmentWebSocket(
+    wsEnabled,
+    handleSnapshot,
+    (event) => applyUpdate(event, true),
+    (payload) => deploymentRealtimeStore.applySnapshot(payload),
+    (payload) => handleDeploymentUpdate(payload, false),
+  )
 
   const mergeAssignment = useCallback((assignment: AssignmentPayload) => {
     assignmentRealtimeStore.mergeAssignment(assignment)
